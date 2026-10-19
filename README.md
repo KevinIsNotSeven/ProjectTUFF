@@ -6,7 +6,7 @@ A set of tweaks for **Super Smash Bros. Ultimate 13.0.4** layered on top of **[H
 
 | Feature | Where it lives |
 |---|---|
-| **Bumper variants.** Each bumper is randomly normal, weak (sponge) or strong ("tuff", 1.5× knockback), with its own texture and sound. Soccer balls are randomly normal, spike (launches down), launch (straight up) or gravity (pulls fighters in), each with its own texture. | `hdr-melee-fox-dev/source/item_variants` (plugin + ARCropolis mod in `mod/`) |
+| **Bumper variants.** Each bumper is randomly normal, weak (sponge) or strong ("tuff", 1.5× knockback), with its own texture and sound. Soccer balls are randomly normal, spike (launches down), launch (straight up) or gravity (strongly pulls fighters in, even off the ground), each with its own texture. | `hdr-melee-fox-dev/source/item_variants` (plugin + ARCropolis mod in `mod/`) |
 | **K. Rool back to his base Ultimate moveset**, and Dedede's down tilt back to base Ultimate. | `hdr-melee-fox-dev/source/tuff_tweaks` |
 | **Kirby** starts each stock with a random copy ability, and has Jigglypuff's air speed. | `tuff_tweaks` (copy ability); air speed is in `fighter_param.prcxml` on the SD card |
 | **Bigger final hit.** The game-ending KO lasts 3 seconds, strobes red/blue, plays the bumper's KUNG slowed down, and the camera spins 360° around the hit (tune it, or turn the spin off, in `SD:\tuff_final_hit.txt`). | `tuff_tweaks` (`final_hit`); sound in `sd_install/ultimate/mods/parry-sound` |

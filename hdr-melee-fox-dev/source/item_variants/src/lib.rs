@@ -13,7 +13,7 @@
 //! | Soccer ball | normal  | NormalSoccer texture   | unchanged                                |
 //! | Soccer ball | spike   | SpikeSoccer (purple)   | launches down (280 degrees)              |
 //! | Soccer ball | launch  | LaunchSoccer (yellow)  | launches straight up (90 degrees)        |
-//! | Soccer ball | gravity | GravitySoccer (cyan)   | pulls nearby fighters toward it          |
+//! | Soccer ball | gravity | GravitySoccer (cyan)   | strongly pulls fighters in, even off the ground |
 //!
 //! Everything runs from one per-frame callback on every fighter (smashline "fighter" agent).
 //!
@@ -52,11 +52,15 @@ const SOCCER_MESHES: [&str; 4] = ["normal_gamemodel", "spike_gamemodel", "launch
 const LAUNCH_ANGLE: i32 = 90;
 
 /// Gravity ball: fighters within this radius get pulled toward the ball.
-const GRAVITY_RADIUS: f32 = 40.0;
-/// Max pull per frame (in position units) at the ball; fades to 0 at the edge of the radius.
-const GRAVITY_MAX_PULL: f32 = 0.6;
+const GRAVITY_RADIUS: f32 = 90.0;
+/// Max pull per frame (in position units) at the ball. It fades with the square root of the
+/// distance, so it stays strong over most of the radius (walking speed is about 1 per frame).
+const GRAVITY_MAX_PULL: f32 = 1.6;
 /// No pull this close to the ball (stops jitter when holding or standing on it).
-const GRAVITY_DEADZONE: f32 = 4.0;
+const GRAVITY_DEADZONE: f32 = 5.0;
+/// Upward pull (per frame) that yanks a standing / walking / running / crouching fighter off
+/// the ground. Fighters in the middle of a move aren't interrupted.
+const GRAVITY_LIFT: f32 = 0.5;
 
 const MAX_GRAVITY_BALLS: usize = 8;
 
@@ -271,12 +275,32 @@ unsafe fn pull_toward_gravity_balls(fighter: &mut L2CFighterCommon, balls: &[(f3
         if dist < GRAVITY_DEADZONE || dist > GRAVITY_RADIUS {
             continue;
         }
-        let pull = GRAVITY_MAX_PULL * (1.0 - dist / GRAVITY_RADIUS);
+        let pull = GRAVITY_MAX_PULL * (1.0 - dist / GRAVITY_RADIUS).sqrt();
         push_x += dx / dist * pull;
         push_y += dy / dist * pull;
     }
     if grounded {
-        // don't lift grounded fighters off the floor; just slide them
+        let free = [
+            *FIGHTER_STATUS_KIND_WAIT,
+            *FIGHTER_STATUS_KIND_WALK,
+            *FIGHTER_STATUS_KIND_DASH,
+            *FIGHTER_STATUS_KIND_RUN,
+            *FIGHTER_STATUS_KIND_RUN_BRAKE,
+            *FIGHTER_STATUS_KIND_TURN,
+            *FIGHTER_STATUS_KIND_TURN_DASH,
+            *FIGHTER_STATUS_KIND_TURN_RUN,
+            *FIGHTER_STATUS_KIND_SQUAT,
+            *FIGHTER_STATUS_KIND_SQUAT_WAIT,
+            *FIGHTER_STATUS_KIND_SQUAT_RV,
+            *FIGHTER_STATUS_KIND_LANDING,
+        ]
+        .contains(&status);
+        if free && push_y > GRAVITY_LIFT {
+            // yanked off the ground: become airborne, then the pull carries them up next frame
+            StatusModule::set_situation_kind(boma, app::SituationKind(*SITUATION_KIND_AIR), true);
+            StatusModule::change_status_request(boma, *FIGHTER_STATUS_KIND_FALL, false);
+        }
+        // the floor holds them down until they're airborne; meanwhile they slide
         push_y = 0.0;
     }
     if push_x != 0.0 || push_y != 0.0 {
