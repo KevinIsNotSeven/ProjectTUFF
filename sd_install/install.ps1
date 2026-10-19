@@ -35,11 +35,14 @@ foreach ($f in $files) {
     if (Test-Path $dest) {
         if ((Get-FileHash $dest).Hash -eq (Get-FileHash $f.FullName).Hash) { continue }
         $bak = Join-Path $backup $rel
-        New-Item -ItemType Directory -Force (Split-Path $bak) | Out-Null
+        $bakDir = Split-Path $bak
+        if (-not (Test-Path $bakDir)) { New-Item -ItemType Directory -Force $bakDir | Out-Null }
         Copy-Item $dest $bak -Force
         $backedUp++
     }
-    New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
+    # (files at the SD root, like tuff_final_hit.txt, have the drive itself as their folder)
+    $destDir = Split-Path $dest
+    if (-not (Test-Path $destDir)) { New-Item -ItemType Directory -Force $destDir | Out-Null }
     Copy-Item $f.FullName $dest -Force
     $copied++
 }
