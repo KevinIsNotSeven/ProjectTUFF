@@ -3,6 +3,11 @@
         "item/bumper/model/body/c00": [
             "item/bumper/model/body/c00/bumper_weak_col.nutexb",
             "item/bumper/model/body/c00/bumper_tuff_col.nutexb"
+        ],
+        "item/soccerball/model/body/c00": [
+            "item/soccerball/model/body/c00/soccerball_spike_col.nutexb",
+            "item/soccerball/model/body/c00/soccerball_launch_col.nutexb",
+            "item/soccerball/model/body/c00/soccerball_gravity_col.nutexb"
         ]
     }
 }

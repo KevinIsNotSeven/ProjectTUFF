@@ -5,21 +5,24 @@ Spicier bumpers and soccer balls.
 **On the SD card:** `sd:/atmosphere/contents/01006A800016E000/romfs/skyline/plugins/libitem_variants.nro`. Delete that file to turn the variants off.
 
 ## How it works
-Smash can't add new item types, so this mod gives the existing items random variants instead. Whenever a bumper or soccer ball spawns, it rolls one (all variants have equal odds) and gets tinted so you can tell which is which. The roll is based on the item's ID, so an item keeps its variant for its whole life.
+Smash can't add new item types, so this mod gives the existing items random variants instead. Whenever a bumper or soccer ball spawns, it rolls one (all variants have equal odds) and shows that variant's own texture so you can tell which is which. The roll is based on the item's ID, so an item keeps its variant for its whole life.
 
-| Item | Variant | Color | Effect |
+| Item | Variant | Look | Effect |
 |---|---|---|---|
 | Bumper | normal | **NormalBumper** texture | unchanged, custom bounce sound |
 | Bumper | weak | **SpongeBumper** texture | knockback ×0.5, WeakBumper sound |
-| Bumper | strong | **TuffBumper** texture (troll face) | knockback ×1.8, Bumper sound |
+| Bumper | strong | **TuffBumper** texture (troll face) | knockback ×1.5, Bumper sound |
+| Soccer ball | normal | **NormalSoccer** texture | unchanged |
+| Soccer ball | spike | **SpikeSoccer** texture (purple) | launches you down (280°) |
+| Soccer ball | launch | **LaunchSoccer** texture (yellow) | launches you straight up (90°) |
+| Soccer ball | gravity | **GravitySoccer** texture (cyan) | pulls nearby fighters toward it while it's out (radius 40, stronger up close; grounded fighters slide but aren't lifted) |
 
 Variants are rolled randomly (system-clock xorshift) the first time the plugin sees an item, and remembered per object id; entries unseen for 1 s expire because ids restart every match.
 
 **2026-10-18 update (3 bumper skins):** the model now has `normal_model`, `weak_model`, `tuff_model` (`bumper_model build <stock> <out> weak=bumper_weak_col tuff=bumper_tuff_col`; `bumper_col.nutexb` itself is replaced with NormalBumper). Sounds: stock `se_item_bumper_repel` is replaced with 0.5 s of silence; the plugin detects it starting (rising edge, per item) and plays `se_item_deathscythe_swing_l` (normal), `_swing_m` (weak) or `_reap` (strong). Sounds were boosted ~7 dB with a limiter (ffmpeg `volume=...,alimiter=limit=0.95`), about 4–6 dB louder on average than the stock bounce. A debug log still writes to `sd:/item_variants_log.txt` (`DEBUG_LOG`, capped at 300 lines).
-| Soccer ball | normal | normal | unchanged |
-| Soccer ball | spike | **purple** | launches you down (280°) |
-| Soccer ball | launch | **yellow** | launches you straight up (90°) |
-| Soccer ball | gravity | **cyan** | pulls nearby fighters toward it while it's out (radius 40, stronger up close; grounded fighters slide but aren't lifted) |
+
+
+**2026-10-19 update (soccer ball textures):** the soccer ball used to be tinted in code; it now works like the bumper. The model has `normal_`/`spike_`/`launch_`/`gravity_gamemodel` (`bumper_model build <stock> <out> spike=soccerball_spike_col launch=soccerball_launch_col gravity=soccerball_gravity_col`; mesh names are lowercased). The textures are edited in `Project TUFF\soccer-texture` (256x128 PNGs, BC7) and converted with its `convert-to-game.bat`. The starting PNGs are the stock texture multiplied by the old tint colors.
 
 To play with only these, turn every other item off in the game's **Items** menu. Nothing else needs to be removed.
 

@@ -9,17 +9,19 @@
 //! |-------------|---------|------------------------|------------------------------------------|
 //! | Bumper      | normal  | NormalBumper texture   | unchanged, custom bounce sound           |
 //! | Bumper      | weak    | SpongeBumper texture   | knockback x0.5, custom bounce sound      |
-//! | Bumper      | strong  | TuffBumper texture     | knockback x1.8, custom bounce sound      |
-//! | Soccer ball | normal  | -                      | unchanged                                |
-//! | Soccer ball | spike   | purple tint            | launches down (280 degrees)              |
-//! | Soccer ball | launch  | yellow tint            | launches straight up (90 degrees)        |
-//! | Soccer ball | gravity | cyan tint              | pulls nearby fighters toward it          |
+//! | Bumper      | strong  | TuffBumper texture     | knockback x1.5, custom bounce sound      |
+//! | Soccer ball | normal  | NormalSoccer texture   | unchanged                                |
+//! | Soccer ball | spike   | SpikeSoccer (purple)   | launches down (280 degrees)              |
+//! | Soccer ball | launch  | LaunchSoccer (yellow)  | launches straight up (90 degrees)        |
+//! | Soccer ball | gravity | GravitySoccer (cyan)   | pulls nearby fighters toward it          |
 //!
 //! Everything runs from one per-frame callback on every fighter (smashline "fighter" agent).
 //!
 //! The bumper looks and sounds come from the `hdr-item-variants` ARCropolis mod:
 //! - The bumper model has three copies of its mesh: `normal_model`, `weak_model` and
-//!   `tuff_model`, each with its own texture. Each bumper shows one of them.
+//!   `tuff_model`, each with its own texture. Each bumper shows one of them. The soccer ball
+//!   works the same way with four copies (`normal_`/`spike_`/`launch_`/`gravity_gamemodel`);
+//!   its textures are edited in Project TUFF\soccer-texture.
 //! - The stock bounce sound `se_item_bumper_repel` is replaced with silence. When it starts on a
 //!   bumper, the plugin plays that bumper's own sound instead. The three sounds live in unused
 //!   Death's Scythe slots of the item sound bank (keep that item off).
@@ -45,6 +47,8 @@ const BUMPER_SOUNDS: [&str; 3] = ["se_item_deathscythe_swing_l", "se_item_deaths
 /// Soccer ball variants: normal, spike, launch, gravity (equal odds).
 const SOCCER_VARIANTS: u32 = 4;
 const SPIKE_ANGLE: i32 = 280;
+/// Mesh for each soccer ball variant (normal, spike, launch, gravity).
+const SOCCER_MESHES: [&str; 4] = ["normal_gamemodel", "spike_gamemodel", "launch_gamemodel", "gravity_gamemodel"];
 const LAUNCH_ANGLE: i32 = 90;
 
 /// Gravity ball: fighters within this radius get pulled toward the ball.
@@ -56,10 +60,6 @@ const GRAVITY_DEADZONE: f32 = 4.0;
 
 const MAX_GRAVITY_BALLS: usize = 8;
 
-// Tints (RGB), applied with MODEL_COLOR_TYPE_COLOR_BLEND.
-const PURPLE: (f32, f32, f32) = (0.75, 0.25, 1.0);
-const YELLOW: (f32, f32, f32) = (1.0, 0.9, 0.2);
-const CYAN: (f32, f32, f32) = (0.2, 1.0, 1.0);
 
 // ---- item manager ---------------------------------------------------------------------------
 
@@ -144,19 +144,9 @@ unsafe fn forget_missing_items() {
 
 // ---- helpers --------------------------------------------------------------------------------
 
-unsafe fn tint(boma: *mut BattleObjectModuleAccessor, (r, g, b): (f32, f32, f32)) {
-    ModelModule::set_color_rgb(
-        boma,
-        r,
-        g,
-        b,
-        app::MODEL_COLOR_TYPE { _address: *MODEL_COLOR_TYPE_COLOR_BLEND as u8 },
-    );
-}
-
-/// Shows only this variant's bumper mesh.
-unsafe fn show_bumper_mesh(boma: *mut BattleObjectModuleAccessor, variant: u32) {
-    for (i, mesh) in BUMPER_MESHES.iter().enumerate() {
+/// Shows only this variant's mesh (one of `meshes`).
+unsafe fn show_mesh(boma: *mut BattleObjectModuleAccessor, meshes: &[&str], variant: u32) {
+    for (i, mesh) in meshes.iter().enumerate() {
         ModelModule::set_mesh_visibility(boma, Hash40::new(mesh), i as u32 == variant);
     }
 }
@@ -226,7 +216,7 @@ unsafe extern "C" fn item_variants_frame(fighter: &mut L2CFighterCommon) {
 
         if kind == *ITEM_KIND_BUMPER {
             let state = item_state(id, BUMPER_VARIANTS);
-            show_bumper_mesh(boma, state.variant);
+            show_mesh(boma, &BUMPER_MESHES, state.variant);
             match state.variant {
                 1 => AttackModule::set_reaction_mul(boma, WEAK_BUMPER_KB_MUL),
                 2 => AttackModule::set_reaction_mul(boma, STRONG_BUMPER_KB_MUL),
@@ -234,17 +224,12 @@ unsafe extern "C" fn item_variants_frame(fighter: &mut L2CFighterCommon) {
             }
             bounce_sound(boma, state);
         } else if kind == *ITEM_KIND_SOCCERBALL {
-            match item_state(id, SOCCER_VARIANTS).variant {
-                1 => {
-                    tint(boma, PURPLE);
-                    set_angle(boma, SPIKE_ANGLE);
-                }
-                2 => {
-                    tint(boma, YELLOW);
-                    set_angle(boma, LAUNCH_ANGLE);
-                }
+            let variant = item_state(id, SOCCER_VARIANTS).variant;
+            show_mesh(boma, &SOCCER_MESHES, variant);
+            match variant {
+                1 => set_angle(boma, SPIKE_ANGLE),
+                2 => set_angle(boma, LAUNCH_ANGLE),
                 3 => {
-                    tint(boma, CYAN);
                     if gravity_count < MAX_GRAVITY_BALLS {
                         gravity_balls[gravity_count] = (PostureModule::pos_x(boma), PostureModule::pos_y(boma));
                         gravity_count += 1;

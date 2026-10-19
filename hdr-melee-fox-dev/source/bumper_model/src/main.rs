@@ -71,7 +71,8 @@ fn track_len(v: &TrackValues) -> usize {
 /// Texture0 swapped. The original meshes are renamed "normal_*" and keep the stock materials.
 fn build(input: &Path, out: &Path, variants: &[(String, String)]) {
     std::fs::create_dir_all(out).unwrap();
-    let rename = |name: &str, prefix: &str| format!("{}_{}", prefix, name.trim_start_matches("game_"));
+    // lowercase: the plugin looks meshes up by hash40 of the name
+    let rename = |name: &str, prefix: &str| format!("{}_{}", prefix, name.trim_start_matches("game_")).to_lowercase();
     let prefixes: Vec<&str> = std::iter::once("normal").chain(variants.iter().map(|(n, _)| n.as_str())).collect();
 
     let mut mesh = MeshData::from_file(input.join("model.numshb")).unwrap();
