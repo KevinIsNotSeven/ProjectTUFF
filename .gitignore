@@ -10,3 +10,7 @@ sd_install/ultimate/mods/skin-*/
 target/
 *.bak
 *.bak-*
+
+# Python
+__pycache__/
+*.pyc
