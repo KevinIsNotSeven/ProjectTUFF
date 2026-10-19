@@ -22,6 +22,10 @@ More detail is in each folder's `NOTES.md` and in [hdr-melee-fox-dev/source/READ
 
 The installer copies everything in `sd_install/`, which is laid out exactly like the SD card. It finds the SD card on its own and backs up any file it replaces to `SD:\hdr-melee-fox-dev\backup\installer-<date>\`. It also turns on the mods listed in `sd_install/enable_mods.txt` in the ARCropolis preset. Running it again is safe.
 
+It then adds every skin in **`D:\TuffCharacterSkins`** (folders or `.zip` files; `.7z`/`.rar` need [7-Zip](https://www.7-zip.org/) installed). Each skin becomes its own `ultimate\mods\skin-<name>` mod. Skins already installed have priority: they keep their costume slots. A new skin keeps its own slot if it's free; otherwise it moves to the lowest free slot (c00-c07), along with its CSS portraits, voice, effects and `config.json` paths. A skin is skipped if that fighter has no free slots left, or if it's already installed. Any file that another enabled mod already has (for example an HDR effect file) is left out, so ARCropolis won't report a conflict. The installer prints what it did for each skin. Each new mod folder has a `tuff_skin_source.txt` saying where it came from and which slots it uses.
+
+To use a different skins folder: `powershell -ExecutionPolicy Bypass -File sd_install\install.ps1 -SkinsDir <folder>`. To see the plan without changing anything: `powershell -ExecutionPolicy Bypass -File sd_install\add_skins.ps1 -Sd D:\ -DryRun`.
+
 ## Folder layout
 ```
 Install to SD.bat           runs sd_install/install.ps1
@@ -55,7 +59,7 @@ Some things to know:
 - **Status scripts can't be reverted the normal way.** smashline has no priority for status scripts, so the last plugin to register one wins, and HDR's plugin loads last. `tuff_tweaks` writes the game's own status functions back into the status table instead.
 
 ## Not included
-- **Character skins** (Melee Fox v2, 64 Fox, Fox 85622, Funky Kong, Groovy Lucas) are made by other people, so they aren't in this repo. Download them from their original pages and put the archives in `CharacterSkins/`. The installer skips any skin folders that are missing.
+- **Character skins** (Melee Fox v2, 64 Fox, Fox 85622, Funky Kong, Groovy Lucas) are made by other people, so they aren't in this repo. Download them from their original pages and put them in `D:\TuffCharacterSkins` (see Installing).
 - **Some files exist only on the SD card for now.** These are the `hdr-melee-fox` mod, the edited `fighter_param.prcxml`, the logo-patched `layout.arc`, `.eff` and launcher files, and the K. Rool file removals. They're described in [CLAUDE_HANDOFF.md](CLAUDE_HANDOFF.md) and the NOTES files.
 
 ## Contributing

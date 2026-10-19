@@ -9,6 +9,10 @@ The installer:
   - copies these files over, backing up any file it replaces to
     SD:\hdr-melee-fox-dev\backup\installer-<date>\,
   - turns on the mod folders listed in enable_mods.txt in the ARCropolis preset.
+  - adds every skin in D:\TuffCharacterSkins (folders or .zip; .7z/.rar need 7-Zip) as its
+    own ultimate\mods\skin-<name> mod. Installed skins keep their slots; a new skin moves
+    to the lowest free slot (c00-c07) if its own is taken, and is skipped if there is no room
+    or it is already installed. Dry run: add_skins.ps1 -Sd D:\ -DryRun
 Running it again is safe: files that are already up to date are skipped.
 
 Currently pending:
