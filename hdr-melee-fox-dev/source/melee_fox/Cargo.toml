@@ -1,0 +1,25 @@
+[package]
+name = "melee_fox"
+version = "0.1.0"
+edition = "2021"
+description = "Melee-style Fox hitboxes layered on top of HDR (smashline overrides)"
+
+[package.metadata.skyline]
+titleid = "01006A800016E000"
+
+[lib]
+crate-type = ["cdylib"]
+
+# Same sources HDR uses; exact revisions are pinned in Cargo.lock to match HDR v0.50.0 (May 2026).
+[dependencies]
+skyline = { git = "https://github.com/ultimate-research/skyline-rs" }
+skyline_smash = { git = "https://github.com/ultimate-research/skyline-smash", features = ["weak_l2cvalue"] }
+smash_script = { git = "https://github.com/WuBoytH/smash-script", branch = "development" }
+smashline = { git = "https://github.com/HDR-Development/smashline" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true

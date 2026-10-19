@@ -1,0 +1,25 @@
+[package]
+name = "littlemac_trip"
+version = "0.1.0"
+edition = "2021"
+description = "Little Mac's dash attack becomes a Villager-style trip"
+
+[package.metadata.skyline]
+titleid = "01006A800016E000"
+
+[lib]
+crate-type = ["cdylib"]
+
+# Same sources/revisions as melee_fox (pinned in Cargo.lock to HDR v0.50.0's era).
+[dependencies]
+skyline = { git = "https://github.com/ultimate-research/skyline-rs" }
+skyline_smash = { git = "https://github.com/ultimate-research/skyline-smash", features = ["weak_l2cvalue"] }
+smash_script = { git = "https://github.com/WuBoytH/smash-script", branch = "development" }
+smashline = { git = "https://github.com/HDR-Development/smashline" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+lto = true

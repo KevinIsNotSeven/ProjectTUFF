@@ -1,0 +1,7 @@
+[package]
+name = "layout_tex"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tegra_swizzle = "0.4"

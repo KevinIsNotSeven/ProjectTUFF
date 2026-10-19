@@ -1,0 +1,8 @@
+display_name="HDR Item Variants (bumper skins + sounds)"
+authors = "Project TUFF"
+description="""
+Normal / weak (sponge) / strong (tuff) bumper textures and bounce sounds.
+Needs libitem_variants.nro in skyline/plugins (it picks each bumper's variant).
+Stock bounce sound is silenced; variant sounds use the Death's Scythe slots (keep that item off).
+"""
+category = "Misc"

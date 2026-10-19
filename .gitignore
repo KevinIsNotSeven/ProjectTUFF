@@ -1,0 +1,12 @@
+# Third-party skins and rips: made by other people, so they aren't redistributed here.
+# Get them from their original pages (see README) and put them in CharacterSkins/.
+CharacterSkins/
+sd_install/ultimate/mods/skins-*/
+sd_install/ultimate/mods/skin-*/
+*.zip
+*.rar
+
+# Build output (builds normally go to an outside CARGO_TARGET_DIR anyway)
+target/
+*.bak
+*.bak-*

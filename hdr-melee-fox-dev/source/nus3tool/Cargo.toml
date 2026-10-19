@@ -1,0 +1,7 @@
+[package]
+name = "nus3tool"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nus3audio = "1.2.0"
