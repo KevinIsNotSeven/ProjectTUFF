@@ -14,6 +14,7 @@
 //!   match and after every respawn. It's picked from the other fighters in the match: their files
 //!   are loaded, so it's the same situation as a normal swallow (copying an absent fighter could
 //!   reference files that aren't loaded).
+//! - **Kirby down air**: frame-6 Melee-Falco-style spike instead of HDR's drill (see kirby_dair).
 //! - **Auto-tech toggle** per player (see auto_tech).
 //! - **Bigger final hit**: slow-mo close-up, red/blue strobe, slow then fast zoom out (see final_hit; tunable in
 //!   sd:/tuff_final_hit.txt).
@@ -315,6 +316,65 @@ mod auto_tech {
     }
 }
 
+// ---- Kirby down air: fast Melee-Falco-style spike ------------------------------------------------
+
+mod kirby_dair {
+    //! Kirby's down air (overrides HDR's at Priority::High):
+    //! - startup: animation frames 1-17 play in 5 frames (HDR: 12), so it hits on frame 6;
+    //! - instead of HDR's drill (2% every 3 frames), every active frame is one spike hit, like
+    //!   Falco's down air in Melee: 12% for the first 4 frames, 9% after, 285 degrees (down,
+    //!   slightly forward). Each opponent can only be hit once.
+    //! The drill effect and sound scripts are unchanged; only the hitboxes and timing are new.
+    use super::*;
+    use smash::app::sv_animcmd::frame;
+    use smash::phx::Hash40;
+    use smash_script::macros::*;
+
+    /// Animation frames 1-17 (the windup) take this many game frames.
+    const STARTUP_FRAMES: f32 = 5.0;
+    const ANGLE: u64 = 285;
+
+    unsafe fn spike(agent: &mut L2CAgentBase, damage: f32, kbg: i32, bkb: i32, hitlag: f32) {
+        // same shape and place as HDR's drill hitbox, a little bigger
+        ATTACK(agent, 0, 0, Hash40::new("top"), damage, ANGLE, kbg, 0, bkb, 5.5, 0.0, -1.4, 2.4, Some(0.0), Some(2.3), Some(0.5),
+            hitlag, 1.0, *ATTACK_SETOFF_KIND_ON, *ATTACK_LR_CHECK_POS, false, 0, 0.0, 0, false, false, false, false, true,
+            *COLLISION_SITUATION_MASK_GA, *COLLISION_CATEGORY_MASK_ALL, *COLLISION_PART_MASK_ALL, false,
+            Hash40::new("collision_attr_normal"), *ATTACK_SOUND_LEVEL_L, *COLLISION_SOUND_ATTR_KICK, *ATTACK_REGION_KICK);
+    }
+
+    unsafe extern "C" fn game_attackairlw(agent: &mut L2CAgentBase) {
+        let lua_state = agent.lua_state_agent;
+        let boma = agent.module_accessor;
+        frame(lua_state, 1.0);
+        FT_MOTION_RATE_RANGE(agent, 1.0, 17.0, STARTUP_FRAMES);
+        frame(lua_state, 17.0);
+        FT_MOTION_RATE(agent, 1.0);
+        if is_excute(agent) {
+            WorkModule::on_flag(boma, *FIGHTER_STATUS_ATTACK_AIR_FLAG_ENABLE_LANDING);
+        }
+        frame(lua_state, 18.0);
+        if is_excute(agent) {
+            spike(agent, 12.0, 92, 20, 1.2); // clean
+        }
+        frame(lua_state, 22.0);
+        if is_excute(agent) {
+            spike(agent, 9.0, 85, 15, 1.0); // late
+        }
+        frame(lua_state, 35.0);
+        if is_excute(agent) {
+            AttackModule::clear_all(boma);
+        }
+        frame(lua_state, 46.0);
+        if is_excute(agent) {
+            WorkModule::off_flag(boma, *FIGHTER_STATUS_ATTACK_AIR_FLAG_ENABLE_LANDING);
+        }
+    }
+
+    pub fn install() {
+        Agent::new("kirby").acmd("game_attackairlw", game_attackairlw, Priority::High).install();
+    }
+}
+
 // ---- final hit, bigger ---------------------------------------------------------------------------
 
 mod final_hit {
@@ -597,6 +657,7 @@ pub fn main() {
     krool_status::install();
     vanilla_acmd::dedede::install();
     kirby_copy::install();
+    kirby_dair::install();
     auto_tech::install();
     final_hit::install();
 }
