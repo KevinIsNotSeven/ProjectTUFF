@@ -1,6 +1,7 @@
 """Installs a folder of downloaded ARCropolis skins onto the Switch SD card.
 
 Usage: py install_skins.py <skins folder> <SD root> [--hashes Hashes_FullPath.txt] [--apply]
+       py install_skins.py --shrink <mod folder>     (shrink oversized textures in place)
 
 Without --apply it only prints what it would do.
 
@@ -19,12 +20,93 @@ Cleanup done on the way:
   ARCropolis "stream;" name they did nothing anyway;
 - moves se_/vc_ sound banks that were put straight in fighter/ to sound/bank/;
 - removes config.json "new-dir-files" entries for files that are neither in the mod nor in the
-  game (a typo or a missing file there can stop ARCropolis from loading the mod).
+  game (a typo or a missing file there can stop ARCropolis from loading the mod);
+- fixes portraits put in ui/replace(_patch)/chara_N/ instead of ui/replace(_patch)/chara/chara_N/;
+- SHRINKS OVERSIZED TEXTURES. The game has fixed memory budgets, and HD skins that blow past them
+  crash it (an out-of-memory abort) when the file loads: picking the costume, scrolling to its
+  portrait, or the results screen. Model/effect textures are capped at 2048 px (the game's own
+  largest), and the big select-screen portraits (chara_3) at 3 megapixels (normal ones are 1.5-2.6). Needs
+  ClaudeTools/ultimate_tex and ffmpeg (paths below).
 
 Installed skins are recorded in <SD>/hdr-melee-fox-dev/skins_manifest.json. A re-run updates
 those folders and leaves every other mod alone. New folders are turned on in the ARCropolis preset.
 """
-import json, os, re, shutil, sys, hashlib, zlib
+import json, os, re, shutil, sys, hashlib, zlib, struct, subprocess, tempfile, math
+
+TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "..", "ClaudeTools")
+TEX = os.path.join(TOOLS, "ultimate_tex", "ultimate_tex_cli.exe")
+FFMPEG = os.path.join(TOOLS, "ffmpeg", "ffmpeg.exe")
+MAX_SIDE = 2048
+MAX_PORTRAIT_PIXELS = 3_000_000
+# DXGI format -> ultimate_tex format name, for re-encoding in the original format.
+DXGI = {98: "BC7RgbaUnorm", 99: "BC7RgbaUnormSrgb", 71: "BC1RgbaUnorm", 72: "BC1RgbaUnormSrgb",
+        77: "BC3RgbaUnorm", 78: "BC3RgbaUnormSrgb", 80: "BC4RUnorm", 83: "BC5RgUnorm",
+        28: "R8G8B8A8Unorm", 29: "R8G8B8A8UnormSrgb"}
+_tmp = tempfile.mkdtemp(prefix="skin_shrink_")
+
+
+def tex_info(path):
+    """(width, height, mip count, dxgi format) of a .nutexb/.bntx, or None if unreadable."""
+    dds = os.path.join(_tmp, "info.dds")
+    if subprocess.run([TEX, path, dds], capture_output=True).returncode:
+        return None
+    d = open(dds, "rb").read(148)
+    h, w = struct.unpack_from("<II", d, 12)
+    mips = max(1, struct.unpack_from("<I", d, 28)[0])
+    fmt = struct.unpack_from("<I", d, 128)[0] if d[84:88] == b"DX10" else None
+    return w, h, mips, fmt
+
+
+def shrink_target(rel, info):
+    """New (width, height) if this texture is too big for the game, else None."""
+    w, h = info[0], info[1]
+    scale = min(1.0, MAX_SIDE / max(w, h))
+    if re.search(r"/chara_3_[^/]+\.bntx$", rel):
+        scale = min(scale, math.sqrt(MAX_PORTRAIT_PIXELS / (w * h)))
+    if scale >= 1.0:
+        return None
+    return max(4, int(w * scale) // 4 * 4), max(4, int(h * scale) // 4 * 4)
+
+
+def shrink(src, dest, rel):
+    """Writes a shrunk copy of src to dest. Returns (old, new) sizes, or None if src is fine."""
+    if not rel.endswith((".nutexb", ".bntx")) or os.path.getsize(src) < 2_000_000:
+        return None
+    info = tex_info(src)
+    if not info:
+        return None
+    size = shrink_target(rel, info)
+    if not size:
+        return None
+    png, small = os.path.join(_tmp, "a.png"), os.path.join(_tmp, "b.png")
+    out = os.path.join(_tmp, "out" + os.path.splitext(rel)[1])
+    subprocess.run([TEX, src, png], check=True, capture_output=True)
+    subprocess.run([FFMPEG, "-loglevel", "error", "-y", "-i", png, "-vf",
+                    f"scale={size[0]}:{size[1]}:flags=lanczos", "-pix_fmt", "rgba", small], check=True)
+    cmd = [TEX, "-f", DXGI.get(info[3], "BC7RgbaUnorm")]
+    if info[2] == 1:
+        cmd.append("--no-mipmaps")
+    subprocess.run(cmd + [small, out], check=True, capture_output=True)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    shutil.copyfile(out, dest)
+    return (info[0], info[1]), size
+
+
+def md5(path):
+    with open(path, "rb") as f:
+        return hashlib.md5(f.read()).hexdigest()
+
+
+if sys.argv[1:2] == ["--shrink"]:
+    root = sys.argv[2]
+    for dp, _, fns in os.walk(root):
+        for f in fns:
+            p = os.path.join(dp, f)
+            rel = os.path.relpath(p, root).replace("\\", "/")
+            r = shrink(p, p, rel)
+            if r:
+                print(f"shrunk {rel}: {r[0][0]}x{r[0][1]} -> {r[1][0]}x{r[1][1]}")
+    sys.exit(0)
 
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 APPLY = "--apply" in sys.argv
@@ -100,6 +182,7 @@ def skin_files(name):
         if (name, rel) in EXCLUDE or top not in GAME_DIRS:
             dropped.append(rel)
             continue
+        rel = re.sub(r"^ui/(replace|replace_patch)/(chara_\d+/)", r"ui/\1/chara/\2", rel)
         m = re.match(r"fighter/((se|vc)_[a-z0-9_]+\.nus3(audio|bank))$", rel)
         if m:  # sound bank put straight in fighter/
             rel = ("sound/bank/fighter/" if m.group(2) == "se" else "sound/bank/fighter_voice/") + m.group(1)
@@ -119,7 +202,10 @@ def same(a, b):
 
 
 manifest = json.load(open(MANIFEST)) if os.path.exists(MANIFEST) else {}
-managed = set(manifest.values())
+if "skins" not in manifest:  # first version of the manifest was just {skin: folder}
+    manifest = {"skins": manifest, "shrunk": {}}
+shrunk = manifest["shrunk"]  # "<folder>/<rel>" -> md5 of the source it was shrunk from
+managed = set(manifest["skins"].values())
 
 # What's already installed (mods this script didn't make).
 installed_files, installed_claims = {}, {}
@@ -161,7 +247,7 @@ for name in sorted(os.listdir(SRC), key=str.lower):
     if not any(r not in MOD_FILES for r in keep):
         report.append((name, None, notes + ["NOT INSTALLED: nothing left after conflicts"]))
         continue
-    folder = manifest.get(name, slug(name))
+    folder = manifest["skins"].get(name, slug(name))
     for rel in keep:
         if rel not in MOD_FILES:
             taken_files.setdefault(rel.lower(), folder)
@@ -201,6 +287,12 @@ for name, folder, notes in report:
                 for f in removed:
                     notes.append(f"config.json: removed entry for missing file {f}")
         print(f"   {len(keep)} files")
+        for rel, src in keep.items():
+            if rel.endswith((".nutexb", ".bntx")) and os.path.getsize(src) >= 2_000_000:
+                info = tex_info(src)
+                size = info and shrink_target(rel, info)
+                if size:
+                    notes.append(f"will shrink {rel}: {info[0]}x{info[1]} -> {size[0]}x{size[1]}")
     for n in notes:
         print("   " + n)
 
@@ -226,11 +318,21 @@ for name, (folder, keep) in plan.items():
                 open(dest, "w", encoding="utf-8").write(text)
                 copied += 1
             continue
+        key = f"{folder}/{rel}"
+        if os.path.exists(dest) and key in shrunk and shrunk[key] == md5(src):
+            continue  # already shrunk from this exact source
+        r = shrink(src, dest, rel)
+        if r:
+            shrunk[key] = md5(src)
+            print(f"shrunk {folder}/{rel}: {r[0][0]}x{r[0][1]} -> {r[1][0]}x{r[1][1]}")
+            copied += 1
+            continue
+        shrunk.pop(key, None)
         if os.path.exists(dest) and same(src, dest):
             continue
         shutil.copyfile(src, dest)
         copied += 1
-    manifest[name] = folder
+    manifest["skins"][name] = folder
 os.makedirs(os.path.dirname(MANIFEST), exist_ok=True)
 json.dump(manifest, open(MANIFEST, "w"), indent=2)
 print(f"\ncopied {copied} files into {len(plan)} skin folders")

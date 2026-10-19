@@ -25,7 +25,7 @@ The installer copies everything in `sd_install/`, which is laid out exactly like
 ### Skins
 Put downloaded skins (unzipped, one folder per skin) in `TuffCharacterSkins` at the root of the SD card. Then double-click **`Install Skins.bat`**. It shows what it will do and asks before installing.
 
-Each skin becomes its own mod, `ultimate/mods/skin-<name>`. Skins already on the card keep their costume slots: a new skin for a slot that's already taken is skipped as a whole. That way you never end up with one skin's model and another skin's voice. The script also cleans out readmes and macOS junk, and removes config entries that point at missing files, since those can stop ARCropolis from loading a mod. The rules are explained at the top of [install_skins.py](hdr-melee-fox-dev/source/skin_installer/install_skins.py).
+Each skin becomes its own mod, `ultimate/mods/skin-<name>`. Skins already on the card keep their costume slots: a new skin for a slot that's already taken is skipped as a whole. That way you never end up with one skin's model and another skin's voice. The script also cleans out readmes and macOS junk, and removes config entries that point at missing files, since those can stop ARCropolis from loading a mod. It also **shrinks oversized textures**: model textures are capped at 2048 px, and the big select-screen portraits (`chara_3`) at 3 megapixels. HD skins over those limits run the game out of memory, and it crashes when the costume is picked, when its portrait comes up, or on the results screen. To shrink a mod that's already installed, run `py install_skins.py --shrink <mod folder>`. The rules are explained at the top of [install_skins.py](hdr-melee-fox-dev/source/skin_installer/install_skins.py).
 
 ## Folder layout
 ```
