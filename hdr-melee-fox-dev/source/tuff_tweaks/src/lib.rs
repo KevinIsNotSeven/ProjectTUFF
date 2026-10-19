@@ -335,7 +335,9 @@ mod final_hit {
     //!
     //! The orbit uses the final-smash camera command (CAM_ZOOM_IN_FINAL). Its arguments were
     //! worked out from Cloud's final smash: x, y, yaw, pitch, distance, flag, status work slot
-    //! holding the target's object id, smoothing frames. A level orbit (pitch near 0) swings the
+    //! holding the target's object id, smoothing frames. Yaw 0 is behind the fighter. The game
+    //! only ever aims it once per final smash (Cloud's two calls are an if/else on facing), each
+    //! time right after a normal CAM_ZOOM_OUT; repeated calls on their own are ignored. A level orbit (pitch near 0) swings the
     //! camera beside and behind the stage, where the stage itself blocks the view, so by default
     //! it circles from above, looking down.
     use super::*;
@@ -403,8 +405,8 @@ pitch = 45             # camera tilt in degrees; positive = above, looking down 
 distance = 120         # camera distance (Cloud's final smash uses 160-195; smaller = closer)
 height = 0             # raise / lower the point the camera looks at
 smooth = 10            # frames the camera takes to glide to each new angle
-reissue = 1            # 1 = release and re-grab the camera at each new angle. With 0 only the
-                       # very first angle stuck (tests 2-4)
+reissue = 1            # 1 = CAM_ZOOM_OUT then CAM_ZOOM_IN_FINAL at each new angle, the way the
+                       # game's final smashes aim the camera. With 0 only the first angle stuck
 step_seconds = 0.25    # how often the camera gets a new angle (0 = every frame)
 yaw_offset = 180       # where the orbit starts; 0 was behind the fighter, so 180 = in front
 flash = 1              # 1 = background flips red / blue, 0 = HDR's normal team color
@@ -487,7 +489,9 @@ dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that 
         let yaw = (yaw + 180.0).rem_euclid(360.0) - 180.0;
         fighter.clear_lua_stack();
         if c.reissue {
-            sv_animcmd::CAM_ZOOM_OUT_FINAL(fighter.lua_state_agent);
+            // The game's own final smashes (Cloud, Little Mac) call the normal CAM_ZOOM_OUT right
+            // before CAM_ZOOM_IN_FINAL. CAM_ZOOM_OUT_FINAL here just zoomed out (test 5).
+            sv_animcmd::CAM_ZOOM_OUT(fighter.lua_state_agent);
             fighter.clear_lua_stack();
         }
         lua_args!(fighter, 0.0f32, c.height, yaw, c.pitch, c.distance, true, TARGET_WORK_INT, c.smooth);
