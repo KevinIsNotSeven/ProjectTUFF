@@ -1,6 +1,9 @@
 Project TUFF - pending SD card changes
 
-Everything in this folder is laid out exactly like the SD card. To install:
+Everything in this folder is laid out exactly like the SD card. Two ways to install it:
+  - On the Switch: open "Project TUFF Updater" in the Homebrew Menu (downloads this folder from
+    GitHub; no PC needed). Then close and reopen Smash.
+  - On a PC:
   1. Put the Switch SD card in the PC.
   2. Double-click "Install to SD.bat" in the Project TUFF folder.
 

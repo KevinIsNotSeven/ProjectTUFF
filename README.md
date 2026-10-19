@@ -24,6 +24,9 @@ More detail is in each folder's `NOTES.md` and in [hdr-melee-fox-dev/source/READ
 
 The installer copies everything in `sd_install/`, which is laid out exactly like the SD card. It finds the SD card on its own and backs up any file it replaces to `SD:\hdr-melee-fox-dev\backup\installer-<date>\`. It also turns on the mods listed in `sd_install/enable_mods.txt` in the ARCropolis preset. Running it again is safe.
 
+### Updating from the Switch (no PC needed)
+Open **Project TUFF Updater** in the Homebrew Menu. It downloads the latest files in `sd_install/` from this GitHub repo, so you don't have to take the SD card out. It only downloads what changed, checks every download, and backs up anything it replaces to `SD:\hdr-melee-fox-dev\backup\updater-<date>\`. It also turns on new mods in ARCropolis. Close Smash and open it again afterwards to load the changes. The updater updates itself the same way. Its source is in `hdr-melee-fox-dev/source/updater` (C, libnx + curl). To build it, copy it to a folder without spaces and run `make` with devkitPro.
+
 ### Skins
 Put downloaded skins (unzipped, one folder per skin) in `TuffCharacterSkins` at the root of the SD card. Then double-click **`Install Skins.bat`**. It shows what it will do and asks before installing.
 
@@ -44,6 +47,7 @@ hdr-melee-fox-dev/source/   source for every plugin and tool
   bumper_model/               builds the bumper model with extra texture variants
   nus3tool/                   patches and extracts tracks in .nus3audio / .patch3audio banks
   skin_installer/             installs a folder of skins with slot-conflict handling
+  updater/                    the Switch updater app (Homebrew Menu)
   recolor_ui/                 turns HDR's green menu theme red (layouts + launcher)
 bumper-texture/             bumper textures and sounds (custom/) + the original
 soccer-texture/             soccer ball textures: one 2:1 world-map PNG per variant (run convert-to-game.bat)
