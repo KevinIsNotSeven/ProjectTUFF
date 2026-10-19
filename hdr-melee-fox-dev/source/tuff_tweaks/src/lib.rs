@@ -15,7 +15,7 @@
 //!   are loaded, so it's the same situation as a normal swallow (copying an absent fighter could
 //!   reference files that aren't loaded).
 //! - **Auto-tech toggle** per player (see auto_tech).
-//! - **Bigger final hit**: longer, red/blue strobe, camera orbit (see final_hit; tunable in
+//! - **Bigger final hit**: slow-mo close-up, red/blue strobe, slow then fast zoom out (see final_hit; tunable in
 //!   sd:/tuff_final_hit.txt).
 
 use smash::app::{self, lua_bind::*, BattleObjectModuleAccessor};
@@ -319,30 +319,29 @@ mod auto_tech {
 
 mod final_hit {
     //! HDR's final-hit moment (the game-ending KO), made bigger:
-    //! - lasts longer (the slow motion is kept going);
-    //! - HDR's lightning background (normally in the attacker's team color) flips between its
-    //!   red and blue versions;
-    //! - the camera orbits around the fighter who got hit;
-    //! - the sound is the bumper's "KUNG", slowed to 0.7x. That part is a file, not code: it
-    //!   replaces `se_common_boss_down` in parry-sound's se_common.patch3audio.
+    //! 1. the camera snaps to a close-up of the KO'd fighter, in slow motion, while HDR's lightning
+    //!    background flips between its red and blue versions;
+    //! 2. the camera slowly zooms back out;
+    //! 3. then it snaps out fast with a big screen shake and a second "KUNG", and the slow motion
+    //!    cuts off, so the fighter rockets away at full speed.
+    //! The KUNG itself (the bumper sound, slowed to 0.7x) is a file, not code: it replaces
+    //! `se_common_boss_down` in parry-sound's se_common.patch3audio.
     //!
     //! Everything is tunable without rebuilding in sd:/tuff_final_hit.txt (written with the
     //! defaults the first time it's missing, read again at every final hit).
     //!
     //! HDR plays `se_common_boss_down` on the KO'd fighter at the exact moment of the final hit,
     //! so this watches for that sound starting. Timing uses the system clock, not frames, because
-    //! everything runs in slow motion during the effect.
+    //! everything runs in slow motion.
     //!
-    //! The orbit uses the final-smash camera command (CAM_ZOOM_IN_FINAL). Its arguments were
-    //! worked out from Cloud's final smash: x, y, yaw, pitch, distance, flag, status work slot
-    //! holding the target's object id, smoothing frames. Yaw 0 is behind the fighter. The game
-    //! only ever aims it once per final smash (Cloud's two calls are an if/else on facing), each
-    //! time right after a normal CAM_ZOOM_OUT; repeated calls on their own are ignored. A level orbit (pitch near 0) swings the
-    //! camera beside and behind the stage, where the stage itself blocks the view, so by default
-    //! it circles from above, looking down.
+    //! Camera notes from testing: the game has no way to rotate the camera (CameraModule only
+    //! zooms / shakes / changes range), and the final-smash camera (CAM_ZOOM_IN_FINAL) can only be
+    //! aimed once, so a 360 orbit isn't possible. This uses the normal zoom (the smash-attack
+    //! charge zoom): CameraModule::zoom_in(frames, 0, magnification, offset, false) and
+    //! zoom_out(frames).
     use super::*;
     use smash::app::sv_animcmd;
-    use smash::phx::Hash40;
+    use smash::phx::{Hash40, Vector2f};
     use smash_script::lua_args;
 
     const CONFIG_PATH: &str = "sd:/tuff_final_hit.txt";
@@ -354,40 +353,35 @@ mod final_hit {
         "sys_bg_finishhit", "sys_bg_finishhit_r", "sys_bg_finishhit_b", "sys_bg_finishhit_y", "sys_bg_finishhit_g",
         "sys_bg_finishhit_o", "sys_bg_finishhit_c", "sys_bg_finishhit_m", "sys_bg_finishhit_p",
     ];
-    /// Status work slot the camera reads the target id from. Damage statuses use slots up to
-    /// 0x16 and other statuses go up to 0x19, so 0x18 is free while the fighter is launched.
-    const TARGET_WORK_INT: i32 = 0x11000018;
     const TICKS_PER_SECOND: f32 = 19_200_000.0;
     const MAX_ENTRIES: usize = 8;
 
     #[derive(Clone, Copy)]
     struct Config {
         seconds: f32,
-        spin: bool,
-        turns: f32,
-        pitch: f32,
-        distance: f32,
-        height: f32,
-        smooth: f32,
-        reissue: bool,
-        step_seconds: f32,
-        yaw_offset: f32,
+        zoom: bool,
+        zoom_start: f32,
+        zoom_end: f32,
+        zoom_in_frames: f32,
+        zoom_step_seconds: f32,
+        fast_out_frames: f32,
+        shake: bool,
+        kung_again: bool,
         flash: bool,
         flash_seconds: f32,
         dark_seconds: f32,
     }
 
     const DEFAULTS: Config = Config {
-        seconds: 3.0,
-        spin: true,
-        turns: 0.0,
-        pitch: 10.0,
-        distance: 100.0,
-        height: 0.0,
-        smooth: 10.0,
-        reissue: false,
-        step_seconds: 0.25,
-        yaw_offset: 200.0,
+        seconds: 2.4,
+        zoom: true,
+        zoom_start: 3.0,
+        zoom_end: 2.0,
+        zoom_in_frames: 3.0,
+        zoom_step_seconds: 0.1,
+        fast_out_frames: 5.0,
+        shake: true,
+        kung_again: true,
         flash: true,
         flash_seconds: 0.25,
         dark_seconds: 99.0,
@@ -396,24 +390,24 @@ mod final_hit {
     const CONFIG_TEXT: &str = "\
 # Project TUFF - final hit settings. Read at every final hit, no rebuild needed.
 # Lines are  name = value  ; anything after # is ignored.
+#
+# What happens: the camera snaps to a close-up of the KO'd fighter in slow motion, slowly zooms
+# back out, then snaps out fast with a screen shake while the slow motion cuts off, so they go
+# flying at full speed.
 
-seconds = 3.0          # how long the final hit lasts (HDR's own is about 1)
-spin = 1               # 1 = final-smash style camera on the hit fighter, 0 = normal camera
-turns = 0              # 0 = hold one angle (works). Anything else tries to orbit, but the
-                       # game's final-smash camera can only be aimed once, so it doesn't turn
-pitch = 10             # camera tilt in degrees; positive = above, looking down (negative puts
-                       # the camera under the stage)
-distance = 100         # camera distance (Cloud's final smash uses 160-195; smaller = closer)
-height = 0             # raise / lower the point the camera looks at
-smooth = 10            # frames the camera takes to glide to each new angle
-reissue = 0            # orbit experiment: 1 = CAM_ZOOM_OUT before each new angle (that only
-                       # zoomed the camera far out in testing)
-step_seconds = 0.25    # how often the camera gets a new angle (0 = every frame)
-yaw_offset = 200       # camera angle around the fighter: 180 = straight in front, 0 = behind
-flash = 1              # 1 = background flips red / blue, 0 = HDR's normal team color
-flash_seconds = 0.25   # how long each red / blue lasts
-dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that off after this
-                       # many seconds (99 = keep it the whole time, like HDR)
+seconds = 2.4            # how long the slow-motion part lasts before the fast snap out
+zoom = 1                 # 1 = close-up + zoom out, 0 = leave the camera alone
+zoom_start = 3.0         # close-up zoom at the hit (1 = normal, bigger = closer)
+zoom_end = 2.0           # zoom it slowly eases out to by the end of the slow part
+zoom_in_frames = 3       # frames to snap into the close-up
+zoom_step_seconds = 0.1  # how often the slow zoom-out gets a new zoom level
+fast_out_frames = 5      # frames for the fast snap back out (smaller = faster)
+shake = 1                # 1 = big screen shake at the snap
+kung_again = 1           # 1 = play the KUNG again at the snap
+flash = 1                # 1 = background flips red / blue, 0 = HDR's normal team color
+flash_seconds = 0.25     # how long each red / blue lasts
+dark_seconds = 99        # HDR blacks out the stage at the final hit; switch that off after this
+                         # many seconds (99 = keep it until the snap, like HDR)
 ";
 
     fn parse_bool(v: &str) -> bool {
@@ -436,17 +430,16 @@ dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that 
             let f = v.parse::<f32>().ok();
             match (k, f) {
                 ("seconds", Some(x)) => c.seconds = x.clamp(0.2, 20.0),
-                ("turns", Some(x)) => c.turns = x,
-                ("pitch", Some(x)) => c.pitch = x,
-                ("distance", Some(x)) => c.distance = x,
-                ("height", Some(x)) => c.height = x,
-                ("smooth", Some(x)) => c.smooth = x,
-                ("step_seconds", Some(x)) => c.step_seconds = x.max(0.0),
-                ("yaw_offset", Some(x)) => c.yaw_offset = x,
-                ("dark_seconds", Some(x)) => c.dark_seconds = x,
-                ("reissue", _) => c.reissue = parse_bool(v),
+                ("zoom_start", Some(x)) => c.zoom_start = x.max(1.0),
+                ("zoom_end", Some(x)) => c.zoom_end = x.max(1.0),
+                ("zoom_in_frames", Some(x)) => c.zoom_in_frames = x.max(0.0),
+                ("zoom_step_seconds", Some(x)) => c.zoom_step_seconds = x.max(0.02),
+                ("fast_out_frames", Some(x)) => c.fast_out_frames = x.max(0.0),
                 ("flash_seconds", Some(x)) => c.flash_seconds = x.max(0.02),
-                ("spin", _) => c.spin = parse_bool(v),
+                ("dark_seconds", Some(x)) => c.dark_seconds = x,
+                ("zoom", _) => c.zoom = parse_bool(v),
+                ("shake", _) => c.shake = parse_bool(v),
+                ("kung_again", _) => c.kung_again = parse_bool(v),
                 ("flash", _) => c.flash = parse_bool(v),
                 _ => {}
             }
@@ -458,9 +451,14 @@ dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that 
     static mut START: [u64; MAX_ENTRIES] = [0; MAX_ENTRIES]; // 0 = not running
     static mut WAS_PLAYING: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
     static mut SHOWN: [i32; MAX_ENTRIES] = [-1; MAX_ENTRIES]; // which STROBE background is up
-    static mut LAST_LOG: [f32; MAX_ENTRIES] = [0.0; MAX_ENTRIES];
-    static mut LAST_STEP: [i32; MAX_ENTRIES] = [-1; MAX_ENTRIES];
+    static mut ZOOM_STEP: [i32; MAX_ENTRIES] = [-1; MAX_ENTRIES];
     static mut DARK_OFF: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
+    /// While the second KUNG plays, don't mistake it for a new final hit.
+    static mut IGNORE_SOUND: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
+
+    fn now() -> u64 {
+        unsafe { skyline::nn::os::GetSystemTick() }
+    }
 
     /// Starts a full-screen background effect (the final-smash / final-hit kind). Arguments as
     /// in Meta Knight's final smash: kind, x, y, z, rot x, y, z, scale.
@@ -479,39 +477,23 @@ dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that 
         fighter.clear_lua_stack();
     }
 
-    fn now() -> u64 {
-        unsafe { skyline::nn::os::GetSystemTick() }
-    }
-
-    unsafe fn camera(fighter: &mut L2CFighterCommon, c: &Config, yaw: f32) {
-        let boma = fighter.module_accessor;
-        let id = (*fighter.battle_object).battle_object_id;
-        WorkModule::set_int(boma, id as i32, TARGET_WORK_INT);
-        let yaw = (yaw + 180.0).rem_euclid(360.0) - 180.0;
-        fighter.clear_lua_stack();
-        if c.reissue {
-            // The game's own final smashes (Cloud, Little Mac) call the normal CAM_ZOOM_OUT right
-            // before CAM_ZOOM_IN_FINAL. CAM_ZOOM_OUT_FINAL here just zoomed out (test 5).
-            sv_animcmd::CAM_ZOOM_OUT(fighter.lua_state_agent);
-            fighter.clear_lua_stack();
-        }
-        lua_args!(fighter, 0.0f32, c.height, yaw, c.pitch, c.distance, true, TARGET_WORK_INT, c.smooth);
-        sv_animcmd::CAM_ZOOM_IN_FINAL(fighter.lua_state_agent);
-        fighter.clear_lua_stack();
+    unsafe fn zoom(fighter: &mut L2CFighterCommon, frames: f32, mag: f32) {
+        let zero = Vector2f { x: 0.0, y: 0.0 };
+        CameraModule::zoom_in(fighter.module_accessor, frames as i32, 0, mag, &zero, false);
     }
 
     unsafe fn start(entry: usize) {
         CONFIG = load_config();
         let c = CONFIG;
         SHOWN[entry] = -1;
-        START[entry] = now();
-        LAST_LOG[entry] = 0.0;
-        LAST_STEP[entry] = -1;
+        ZOOM_STEP[entry] = -1;
         DARK_OFF[entry] = false;
-        log(&format!("P{} final hit: start (seconds {} spin {} turns {} pitch {} distance {} smooth {} reissue {} step {} yaw0 {} flash {} dark {})",
-            entry + 1, c.seconds, c.spin, c.turns, c.pitch, c.distance, c.smooth, c.reissue, c.step_seconds, c.yaw_offset, c.flash, c.dark_seconds));
+        START[entry] = now();
+        log(&format!("P{} final hit: start (seconds {} zoom {} {}->{} fast {} shake {} kung {} flash {})",
+            entry + 1, c.seconds, c.zoom, c.zoom_start, c.zoom_end, c.fast_out_frames, c.shake, c.kung_again, c.flash));
     }
 
+    /// The snap: fast zoom out, shake, second KUNG, slow motion and backgrounds off.
     unsafe fn finish(fighter: &mut L2CFighterCommon, entry: usize, why: &str) {
         let boma = fighter.module_accessor;
         let c = CONFIG;
@@ -521,12 +503,19 @@ dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that 
             }
             effect_off(fighter, "sys_bg_black");
         }
-        if c.spin {
-            fighter.clear_lua_stack();
-            sv_animcmd::CAM_ZOOM_OUT_FINAL(fighter.lua_state_agent);
-            fighter.clear_lua_stack();
+        if c.zoom {
+            CameraModule::zoom_out(boma, c.fast_out_frames as i32);
         }
         SlowModule::clear_whole(boma);
+        if why == "time" {
+            if c.shake {
+                CameraModule::req_quake(boma, *CAMERA_QUAKE_KIND_XL);
+            }
+            if c.kung_again {
+                IGNORE_SOUND[entry] = true;
+                SoundModule::play_se(boma, Hash40::new("se_common_boss_down"), false, false, false, false, app::enSEType(0));
+            }
+        }
         START[entry] = 0;
         log(&format!("P{} final hit: end ({})", entry + 1, why));
     }
@@ -538,7 +527,10 @@ dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that 
             return;
         }
         let playing = SoundModule::is_playing(boma, Hash40::new("se_common_boss_down"));
-        if playing && !WAS_PLAYING[entry] && START[entry] == 0 {
+        if !playing {
+            IGNORE_SOUND[entry] = false;
+        }
+        if playing && !WAS_PLAYING[entry] && START[entry] == 0 && !IGNORE_SOUND[entry] {
             start(entry);
         }
         WAS_PLAYING[entry] = playing;
@@ -558,7 +550,6 @@ dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that 
         if !DARK_OFF[entry] && t >= c.dark_seconds {
             DARK_OFF[entry] = true;
             effect_off(fighter, "sys_bg_black");
-            log(&format!("P{} final hit: dark stage off at {:.2}", entry + 1, t));
         }
         // HDR switches the slow motion off after ~25 frames; keep it going.
         if SlowModule::whole_mag(boma) <= 1 {
@@ -574,26 +565,19 @@ dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that 
                 background(fighter, STROBE[pick as usize]);
             }
         }
-        if c.spin {
-            // one new angle per step (or every frame with step_seconds = 0), aimed at where the
-            // orbit will be when the camera finishes gliding there
-            let step = if c.turns == 0.0 {
-                0 // hold one angle: aim once
-            } else if c.step_seconds > 0.0 {
-                (t / c.step_seconds) as i32
-            } else {
-                -2
-            };
-            if step == -2 || step != LAST_STEP[entry] {
-                LAST_STEP[entry] = step;
-                let at = if step >= 0 { (step + 1) as f32 * c.step_seconds } else { t };
-                let yaw = c.yaw_offset + 360.0 * c.turns * at / c.seconds;
-                camera(fighter, &c, yaw);
-            }
-            let yaw = c.yaw_offset + 360.0 * c.turns * t / c.seconds;
-            if t - LAST_LOG[entry] >= 0.5 {
-                LAST_LOG[entry] = t;
-                log(&format!("P{} final hit: t {:.2} yaw {:.0}", entry + 1, t, yaw));
+        if c.zoom {
+            // step 0 snaps into the close-up; later steps ease the zoom out a little at a time,
+            // each one gliding over the length of a step (at 60 fps)
+            let step = (t / c.zoom_step_seconds) as i32;
+            if step != ZOOM_STEP[entry] {
+                ZOOM_STEP[entry] = step;
+                if step == 0 {
+                    zoom(fighter, c.zoom_in_frames, c.zoom_start);
+                } else {
+                    let k = ((step + 1) as f32 * c.zoom_step_seconds / c.seconds).min(1.0);
+                    let eased = k * k; // starts slow, picks up toward the snap
+                    zoom(fighter, c.zoom_step_seconds * 60.0, c.zoom_start + (c.zoom_end - c.zoom_start) * eased);
+                }
             }
         }
     }

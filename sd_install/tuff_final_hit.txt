@@ -1,20 +1,20 @@
 # Project TUFF - final hit settings. Read at every final hit, no rebuild needed.
 # Lines are  name = value  ; anything after # is ignored.
+#
+# What happens: the camera snaps to a close-up of the KO'd fighter in slow motion, slowly zooms
+# back out, then snaps out fast with a screen shake while the slow motion cuts off, so they go
+# flying at full speed.
 
-seconds = 3.0          # how long the final hit lasts (HDR's own is about 1)
-spin = 1               # 1 = final-smash style camera on the hit fighter, 0 = normal camera
-turns = 0              # 0 = hold one angle (works). Anything else tries to orbit, but the
-                       # game's final-smash camera can only be aimed once, so it doesn't turn
-pitch = 10             # camera tilt in degrees; positive = above, looking down (negative puts
-                       # the camera under the stage)
-distance = 100         # camera distance (Cloud's final smash uses 160-195; smaller = closer)
-height = 0             # raise / lower the point the camera looks at
-smooth = 10            # frames the camera takes to glide to each new angle
-reissue = 0            # orbit experiment: 1 = CAM_ZOOM_OUT before each new angle (that only
-                       # zoomed the camera far out in testing)
-step_seconds = 0.25    # how often the camera gets a new angle (0 = every frame)
-yaw_offset = 200       # camera angle around the fighter: 180 = straight in front, 0 = behind
-flash = 1              # 1 = background flips red / blue, 0 = HDR's normal team color
-flash_seconds = 0.25   # how long each red / blue lasts
-dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that off after this
-                       # many seconds (99 = keep it the whole time, like HDR)
+seconds = 2.4            # how long the slow-motion part lasts before the fast snap out
+zoom = 1                 # 1 = close-up + zoom out, 0 = leave the camera alone
+zoom_start = 3.0         # close-up zoom at the hit (1 = normal, bigger = closer)
+zoom_end = 2.0           # zoom it slowly eases out to by the end of the slow part
+zoom_in_frames = 3       # frames to snap into the close-up
+zoom_step_seconds = 0.1  # how often the slow zoom-out gets a new zoom level
+fast_out_frames = 5      # frames for the fast snap back out (smaller = faster)
+shake = 1                # 1 = big screen shake at the snap
+kung_again = 1           # 1 = play the KUNG again at the snap
+flash = 1                # 1 = background flips red / blue, 0 = HDR's normal team color
+flash_seconds = 0.25     # how long each red / blue lasts
+dark_seconds = 99        # HDR blacks out the stage at the final hit; switch that off after this
+                         # many seconds (99 = keep it until the snap, like HDR)
