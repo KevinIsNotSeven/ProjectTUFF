@@ -9,15 +9,21 @@ Each skin becomes its own mod folder, ultimate/mods/skin-<name>. Separate folder
 merge the files that are meant to stack (ui_chara_db .prcxml/.prcx and msg_name.xmsbt) instead
 of treating them as conflicts.
 
-Mods already on the SD card win every conflict. Conflicts are checked per costume slot, not per
-file: if an installed mod already has a model body or portraits for, say, Fox c07, every file a
-new skin has for Fox c07 is skipped (model, sounds, effects, portraits). Otherwise you'd get one
-skin's model with another skin's voice. Among the new skins, the first one alphabetically wins.
+Mods already on the SD card win every conflict, then skins this script installed on an earlier
+run (so adding skins never bumps one you already have), then new skins alphabetically. Conflicts
+are checked per costume slot, not per file: if an installed mod already has a model body or
+portraits for, say, Fox c07, every file a new skin has for Fox c07 is skipped (model, sounds,
+effects, portraits). Otherwise you'd get one skin's model with another skin's voice. A skin that
+loses a slot also loses its name patches (msg_name.xmsbt, ui_chara_db), which would otherwise
+rename the winner. RELOCATE below moves a skin to another slot by hand instead.
+Folders in the skins folder whose names start with "_" (e.g. "_ModZips") are ignored.
 
 Cleanup done on the way:
 - drops macOS/Windows junk, readmes, images, .blend files, and nested copies of the mod;
-- drops "stream" folders: they're whole-song replacements (not per skin), and without the
-  ARCropolis "stream;" name they did nothing anyway;
+- drops files that replace something for the whole game rather than one costume: music
+  ("stream"/"stream;"), movies ("prebuilt;"), full ui_chara_db.prc / soundlabelinfo.sli copies,
+  the announcer bank and UI layouts. Full copies come from whatever game version the author had
+  and break other characters, HDR and other mods (the .prcxml/.xmsbt patch versions are kept);
 - moves se_/vc_ sound banks that were put straight in fighter/ to sound/bank/;
 - removes config.json "new-dir-files" entries for files that are neither in the mod nor in the
   game (a typo or a missing file there can stop ARCropolis from loading the mod);
@@ -123,11 +129,18 @@ EXCLUDE = {
     # A Bayonetta c00 portrait that has nothing to do with this Ivysaur skin.
     ("Bulbasaur Gang", "ui/replace/chara/chara_1/chara_1_bayonetta_00.bntx"),
 }
+# Hand-picked slot moves: skin folder -> {(fighter, from slot): to slot}.
+RELOCATE = {
+    # Same slot as Kool-Aid Man; every K. Rool costume uses the same model, so c05 is safe.
+    "Hot Dog Vendor over K. Rool": {("krool", "04"): "05"},
+}
 GAME_DIRS = {"fighter", "ui", "sound", "param", "effect", "camera", "item", "standard"}
+# Whole-game replacements (see the docstring).
+GLOBAL = re.compile(r"^(ui/param/.*\.prc$|sound/param/|sound/bank/narration/|ui/layout/)")
 MOD_FILES = {"config.json", "info.toml", "preview.webp", "preview.png", "preview.jpg"}
 JUNK = {".ds_store", "desktop.ini", "thumbs.db"}
 # These patch formats merge across mods, so two skins having them is fine.
-MERGEABLE = re.compile(r"^(param/.*\.(prcxml|prcx)|ui/message/.*\.xmsbt)$")
+MERGEABLE = re.compile(r"^((ui/)?param/.*\.(prcxml|prcx)|ui/message/.*\.xmsbt)$")
 UI_ALIAS = {"ice_climber": "popo", "nana": "popo"}
 
 
@@ -155,6 +168,17 @@ def slot_of(rel):
     return None
 
 
+def relocate(rel, moves):
+    """rel with the costume slot changed per moves {(fighter, from): to}."""
+    for (ch, a), b in moves.items():
+        rel = re.sub(rf"^(fighter/{ch}/.+/)c{a}(/)", rf"\g<1>c{b}\2", rel)
+        rel = re.sub(rf"^(fighter/{ch}/)c{a}$", rf"\g<1>c{b}", rel)  # config.json dir keys
+        rel = re.sub(rf"^(ui/replace(?:_patch)?/chara/chara_\d+/chara_\d+_{ch}_){a}(\.bntx)$", rf"\g<1>{b}\2", rel)
+        rel = re.sub(rf"^(sound/bank/fighter(?:_voice)?/(?:se|vc)_{ch}_)c{a}", rf"\g<1>c{b}", rel)
+        rel = re.sub(rf"^(effect/fighter/{ch}/ef_{ch}_)c{a}(\.eff)$", rf"\g<1>c{b}\2", rel)
+    return rel
+
+
 def mod_files(root):
     """Game-relevant files of a mod folder: {relative path: source path}."""
     out = {}
@@ -179,14 +203,14 @@ def skin_files(name):
             elif rel.lower() not in JUNK:
                 dropped.append(rel)
             continue
-        if (name, rel) in EXCLUDE or top not in GAME_DIRS:
+        if (name, rel) in EXCLUDE or top not in GAME_DIRS or GLOBAL.match(rel.lower()):
             dropped.append(rel)
             continue
         rel = re.sub(r"^ui/(replace|replace_patch)/(chara_\d+/)", r"ui/\1/chara/\2", rel)
         m = re.match(r"fighter/((se|vc)_[a-z0-9_]+\.nus3(audio|bank))$", rel)
         if m:  # sound bank put straight in fighter/
             rel = ("sound/bank/fighter/" if m.group(2) == "se" else "sound/bank/fighter_voice/") + m.group(1)
-        out[rel] = src
+        out[relocate(rel, RELOCATE.get(name, {}))] = src
     return out, dropped
 
 
@@ -224,9 +248,10 @@ if HASHES:
 
 taken_files, taken_claims = dict(installed_files), dict(installed_claims)
 plan, report = {}, []
-for name in sorted(os.listdir(SRC), key=str.lower):
-    if not os.path.isdir(os.path.join(SRC, name)):
-        continue
+known = list(manifest["skins"])
+names = [n for n in os.listdir(SRC) if os.path.isdir(os.path.join(SRC, n)) and not n.startswith("_")]
+names.sort(key=lambda n: (known.index(n) if n in known else len(known), n.lower()))
+for name in names:
     files, dropped = skin_files(name)
     notes = [f"dropped (not game files / excluded): {d}" for d in dropped]
     # whole slots that someone else already owns
@@ -238,6 +263,9 @@ for name in sorted(os.listdir(SRC), key=str.lower):
     for rel, src in files.items():
         s = slot_of(rel.lower())
         if s and s[:2] in lost:
+            continue
+        if lost and MERGEABLE.match(rel.lower()):
+            notes.append(f"skipped {rel}: it would rename the slot's other skin")
             continue
         owner = taken_files.get(rel.lower())
         if owner and not MERGEABLE.match(rel.lower()) and rel not in MOD_FILES:
@@ -261,6 +289,10 @@ for name in sorted(os.listdir(SRC), key=str.lower):
 def fix_config(src, keep):
     """config.json with new-dir-files entries pointing at nothing removed."""
     cfg = json.load(open(src, encoding="utf-8-sig"))
+    moves = RELOCATE.get(next((n for n, (f, k) in plan.items() if k is keep), None), {})
+    if moves and isinstance(cfg.get("new-dir-files"), dict):
+        cfg["new-dir-files"] = {relocate(d, moves): [relocate(f, moves) for f in lst]
+                                for d, lst in cfg["new-dir-files"].items()}
     have = {r.lower() for r in keep}
     removed = []
     ndf = cfg.get("new-dir-files")
