@@ -14,12 +14,29 @@
 //!   match and after every respawn. It's picked from the other fighters in the match: their files
 //!   are loaded, so it's the same situation as a normal swallow (copying an absent fighter could
 //!   reference files that aren't loaded).
+//! - **Auto-tech toggle** per player (see auto_tech).
+//! - **Bigger final hit**: longer, red/blue strobe, 360-degree camera orbit (see final_hit).
 
 use smash::app::{self, lua_bind::*, BattleObjectModuleAccessor};
 use smash::lib::lua_const::*;
 use smash::lua2cpp::{L2CFighterCommon, L2CWeaponCommon};
 use smash::lib::L2CValue;
 use smashline::*;
+
+/// Temporary debug log: sd:/tuff_tweaks_log.txt (capped at 300 lines).
+static mut LOG_LINES: u32 = 0;
+fn log(msg: &str) {
+    unsafe {
+        if LOG_LINES >= 300 {
+            return;
+        }
+        LOG_LINES += 1;
+    }
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("sd:/tuff_tweaks_log.txt") {
+        let _ = writeln!(f, "{}", msg);
+    }
+}
 
 // ---- vanilla move scripts -----------------------------------------------------------------------
 //
@@ -220,21 +237,6 @@ mod auto_tech {
     static mut ENABLED: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
     static mut PREV_STATUS: [i32; MAX_ENTRIES] = [-1; MAX_ENTRIES];
 
-    /// Temporary debug log: sd:/tuff_tweaks_log.txt (capped at 300 lines).
-    static mut LOG_LINES: u32 = 0;
-    fn log(msg: &str) {
-        unsafe {
-            if LOG_LINES >= 300 {
-                return;
-            }
-            LOG_LINES += 1;
-        }
-        use std::io::Write;
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("sd:/tuff_tweaks_log.txt") {
-            let _ = writeln!(f, "{}", msg);
-        }
-    }
-
     unsafe fn confirm(boma: *mut BattleObjectModuleAccessor, on: bool) {
         let se = if on { SOUND_ON } else { SOUND_OFF };
         SoundModule::play_se(boma, Hash40::new(se), true, false, false, false, app::enSEType(0));
@@ -315,6 +317,129 @@ mod auto_tech {
     }
 }
 
+// ---- final hit, bigger ---------------------------------------------------------------------------
+
+mod final_hit {
+    //! HDR's final-hit moment (the game-ending KO), made bigger:
+    //! - lasts SECONDS instead of HDR's ~1 second (the slow motion is kept going);
+    //! - a full-screen flash that strobes red / blue;
+    //! - the camera orbits 360 degrees around the fighter who got hit (SPIN, experimental);
+    //! - the sound is the bumper's "KUNG", slowed to 0.7x. That part is a file, not code: it
+    //!   replaces `se_common_boss_down` in parry-sound's se_common.patch3audio.
+    //!
+    //! HDR plays `se_common_boss_down` on the KO'd fighter at the exact moment of the final hit,
+    //! so this watches for that sound starting. Timing uses the system clock, not frames, because
+    //! everything runs in slow motion during the effect.
+    use super::*;
+    use smash::app::sv_animcmd;
+    use smash::phx::Hash40;
+    use smash_script::lua_args;
+
+    const SECONDS: f32 = 3.0;
+    const SLOW_MUL: u8 = 8; // same slow motion as HDR
+    const FLASH_SECONDS: f32 = 0.12; // how long each red / blue flash lasts
+    const RED: (f32, f32, f32) = (1.0, 0.08, 0.08);
+    const BLUE: (f32, f32, f32) = (0.1, 0.25, 1.0);
+
+    /// 360-degree camera orbit. Uses the final-smash camera command (CAM_ZOOM_IN_FINAL), whose
+    /// arguments were worked out from Cloud's final smash: x, y, yaw, pitch, distance, flag,
+    /// status work slot holding the target's object id, smoothing frames. Set to false if it
+    /// misbehaves; the rest still works. It's also skipped while sd:/tuff_no_spin.txt exists,
+    /// so it can be turned off without rebuilding.
+    const SPIN: bool = true;
+    static mut SPIN_NOW: bool = false;
+    const CAM_PITCH: f32 = -10.0;
+    const CAM_DISTANCE: f32 = 150.0;
+    /// Status work slot the camera reads the target id from. Damage statuses use slots up to
+    /// 0x16 and other statuses go up to 0x19, so 0x18 is free while the fighter is launched.
+    const TARGET_WORK_INT: i32 = 0x11000018;
+
+    const TICKS_PER_SECOND: f32 = 19_200_000.0;
+    const MAX_ENTRIES: usize = 8;
+
+    static mut START: [u64; MAX_ENTRIES] = [0; MAX_ENTRIES]; // 0 = not running
+    static mut WAS_PLAYING: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
+    static mut SCREEN: [u32; MAX_ENTRIES] = [0; MAX_ENTRIES];
+
+    fn now() -> u64 {
+        unsafe { skyline::nn::os::GetSystemTick() }
+    }
+
+    unsafe fn camera(fighter: &mut L2CFighterCommon, yaw: f32) {
+        let boma = fighter.module_accessor;
+        let id = (*fighter.battle_object).battle_object_id;
+        WorkModule::set_int(boma, id as i32, TARGET_WORK_INT);
+        let yaw = if yaw > 180.0 { yaw - 360.0 } else { yaw };
+        fighter.clear_lua_stack();
+        lua_args!(fighter, 0.0f32, 0.0f32, yaw, CAM_PITCH, CAM_DISTANCE, true, TARGET_WORK_INT, 0.0f32);
+        sv_animcmd::CAM_ZOOM_IN_FINAL(fighter.lua_state_agent);
+        fighter.clear_lua_stack();
+    }
+
+    unsafe fn start(fighter: &mut L2CFighterCommon, entry: usize) {
+        let boma = fighter.module_accessor;
+        let handle = EffectModule::req_screen(boma, Hash40::new("bg_finishhit"), false, true, true) as u32;
+        EffectModule::set_billboard(boma, handle, true);
+        SCREEN[entry] = handle;
+        START[entry] = now();
+        SPIN_NOW = SPIN && !std::path::Path::new("sd:/tuff_no_spin.txt").exists();
+        let spin = SPIN_NOW;
+        log(&format!("P{} final hit: start (screen {:#x}, slow mag {} frame {}, spin {})", entry + 1, handle,
+            SlowModule::whole_mag(boma), SlowModule::whole_frame(boma), spin));
+    }
+
+    unsafe fn finish(fighter: &mut L2CFighterCommon, entry: usize, why: &str) {
+        let boma = fighter.module_accessor;
+        EffectModule::remove_screen(boma, Hash40::new("bg_finishhit"), 0);
+        if SPIN_NOW {
+            fighter.clear_lua_stack();
+            sv_animcmd::CAM_ZOOM_OUT_FINAL(fighter.lua_state_agent);
+            fighter.clear_lua_stack();
+        }
+        SlowModule::clear_whole(boma);
+        START[entry] = 0;
+        log(&format!("P{} final hit: end ({})", entry + 1, why));
+    }
+
+    unsafe extern "C" fn frame(fighter: &mut L2CFighterCommon) {
+        let boma: *mut BattleObjectModuleAccessor = fighter.module_accessor;
+        let entry = WorkModule::get_int(boma, *FIGHTER_INSTANCE_WORK_ID_INT_ENTRY_ID) as usize;
+        if entry >= MAX_ENTRIES {
+            return;
+        }
+        let playing = SoundModule::is_playing(boma, Hash40::new("se_common_boss_down"));
+        if playing && !WAS_PLAYING[entry] && START[entry] == 0 {
+            start(fighter, entry);
+        }
+        WAS_PLAYING[entry] = playing;
+        if START[entry] == 0 {
+            return;
+        }
+
+        let t = now().wrapping_sub(START[entry]) as f32 / TICKS_PER_SECOND;
+        let status = StatusModule::status_kind(boma);
+        if t >= SECONDS {
+            return finish(fighter, entry, "time");
+        }
+        if status == *FIGHTER_STATUS_KIND_DEAD || status == *FIGHTER_STATUS_KIND_REBIRTH || status == *FIGHTER_STATUS_KIND_STANDBY {
+            return finish(fighter, entry, "KO'd");
+        }
+        // HDR switches the slow motion off after ~25 frames; keep it going.
+        if SlowModule::whole_mag(boma) <= 1 {
+            SlowModule::set_whole(boma, SLOW_MUL, 30);
+        }
+        let (r, g, b) = if (t / FLASH_SECONDS) as u32 % 2 == 0 { RED } else { BLUE };
+        EffectModule::set_rgb(boma, SCREEN[entry], r, g, b);
+        if SPIN_NOW {
+            camera(fighter, 360.0 * t / SECONDS);
+        }
+    }
+
+    pub fn install() {
+        Agent::new("fighter").on_line(Main, frame).install();
+    }
+}
+
 #[skyline::main(name = "tuff_tweaks")]
 pub fn main() {
     vanilla_acmd::krool::install();
@@ -325,4 +450,5 @@ pub fn main() {
     vanilla_acmd::dedede::install();
     kirby_copy::install();
     auto_tech::install();
+    final_hit::install();
 }

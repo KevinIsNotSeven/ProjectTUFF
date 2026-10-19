@@ -19,3 +19,7 @@ Currently pending:
   - ultimate\mods\skins-fox: Fox c00-c03 Melee Fox v2, c04-c05 64 Fox, c06-c07 Fox (85622).
   - ultimate\mods\skin-funky-kong: Donkey Kong c05.
   - ultimate\mods\skin-groovy-lucas: Lucas c07.
+  - atmosphere\...\plugins\libtuff_tweaks.nro also has the bigger final hit (3 s, red/blue strobe,
+    360-degree camera spin). If the spin misbehaves, create an empty file SD:	uff_no_spin.txt.
+  - ultimate\mods\parry-sound\...\se_common.patch3audio: final-hit sound = slowed bumper KUNG
+    (keeps HDR's amiibo sound and the parry sound).
