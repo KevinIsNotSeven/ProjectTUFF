@@ -26,3 +26,5 @@ Currently pending:
     camera orbit). Tune it in SD:\tuff_final_hit.txt (spin = 0 turns the orbit off).
   - ultimate\mods\parry-sound\...\se_common.patch3audio: final-hit sound = slowed bumper KUNG
     (keeps HDR's amiibo sound and the parry sound).
+  - tuff_final_hit.txt: final-hit settings (goes to the SD root). Edit it on the SD card; the updater
+    only replaces it when a new version is published here.

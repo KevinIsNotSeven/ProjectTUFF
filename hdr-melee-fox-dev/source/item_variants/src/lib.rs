@@ -52,15 +52,15 @@ const SOCCER_MESHES: [&str; 4] = ["normal_gamemodel", "spike_gamemodel", "launch
 const LAUNCH_ANGLE: i32 = 90;
 
 /// Gravity ball: fighters within this radius get pulled toward the ball.
-const GRAVITY_RADIUS: f32 = 90.0;
+const GRAVITY_RADIUS: f32 = 70.0;
 /// Max pull per frame (in position units) at the ball. It fades with the square root of the
 /// distance, so it stays strong over most of the radius (walking speed is about 1 per frame).
-const GRAVITY_MAX_PULL: f32 = 1.6;
+const GRAVITY_MAX_PULL: f32 = 1.1;
 /// No pull this close to the ball (stops jitter when holding or standing on it).
 const GRAVITY_DEADZONE: f32 = 5.0;
 /// Upward pull (per frame) that yanks a standing / walking / running / crouching fighter off
 /// the ground. Fighters in the middle of a move aren't interrupted.
-const GRAVITY_LIFT: f32 = 0.5;
+const GRAVITY_LIFT: f32 = 0.7;
 
 const MAX_GRAVITY_BALLS: usize = 8;
 

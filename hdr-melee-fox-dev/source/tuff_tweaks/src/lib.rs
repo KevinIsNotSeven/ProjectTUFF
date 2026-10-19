@@ -368,6 +368,8 @@ mod final_hit {
         height: f32,
         smooth: f32,
         reissue: bool,
+        step_seconds: f32,
+        yaw_offset: f32,
         flash: bool,
         flash_seconds: f32,
         dark_seconds: f32,
@@ -380,8 +382,10 @@ mod final_hit {
         pitch: 45.0,
         distance: 120.0,
         height: 0.0,
-        smooth: 6.0,
-        reissue: false,
+        smooth: 10.0,
+        reissue: true,
+        step_seconds: 0.25,
+        yaw_offset: 180.0,
         flash: true,
         flash_seconds: 0.25,
         dark_seconds: 99.0,
@@ -398,10 +402,11 @@ pitch = 45             # camera tilt in degrees; positive = above, looking down 
                        # the camera under the stage)
 distance = 120         # camera distance (Cloud's final smash uses 160-195; smaller = closer)
 height = 0             # raise / lower the point the camera looks at
-smooth = 6             # frames the camera takes to catch up with the moving angle. Cloud's
-                       # final smash swings its camera with 10; 0 made the camera stay put
-reissue = 0            # 1 = reset and re-aim the camera every frame (try this if it still
-                       # won't turn with smooth > 0)
+smooth = 10            # frames the camera takes to glide to each new angle
+reissue = 1            # 1 = release and re-grab the camera at each new angle. With 0 only the
+                       # very first angle stuck (tests 2-4)
+step_seconds = 0.25    # how often the camera gets a new angle (0 = every frame)
+yaw_offset = 180       # where the orbit starts; 0 was behind the fighter, so 180 = in front
 flash = 1              # 1 = background flips red / blue, 0 = HDR's normal team color
 flash_seconds = 0.25   # how long each red / blue lasts
 dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that off after this
@@ -433,6 +438,8 @@ dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that 
                 ("distance", Some(x)) => c.distance = x,
                 ("height", Some(x)) => c.height = x,
                 ("smooth", Some(x)) => c.smooth = x,
+                ("step_seconds", Some(x)) => c.step_seconds = x.max(0.0),
+                ("yaw_offset", Some(x)) => c.yaw_offset = x,
                 ("dark_seconds", Some(x)) => c.dark_seconds = x,
                 ("reissue", _) => c.reissue = parse_bool(v),
                 ("flash_seconds", Some(x)) => c.flash_seconds = x.max(0.02),
@@ -449,6 +456,7 @@ dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that 
     static mut WAS_PLAYING: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
     static mut SHOWN: [i32; MAX_ENTRIES] = [-1; MAX_ENTRIES]; // which STROBE background is up
     static mut LAST_LOG: [f32; MAX_ENTRIES] = [0.0; MAX_ENTRIES];
+    static mut LAST_STEP: [i32; MAX_ENTRIES] = [-1; MAX_ENTRIES];
     static mut DARK_OFF: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
 
     /// Starts a full-screen background effect (the final-smash / final-hit kind). Arguments as
@@ -493,9 +501,10 @@ dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that 
         SHOWN[entry] = -1;
         START[entry] = now();
         LAST_LOG[entry] = 0.0;
+        LAST_STEP[entry] = -1;
         DARK_OFF[entry] = false;
-        log(&format!("P{} final hit: start (seconds {} spin {} turns {} pitch {} distance {} smooth {} reissue {} flash {} dark {})",
-            entry + 1, c.seconds, c.spin, c.turns, c.pitch, c.distance, c.smooth, c.reissue, c.flash, c.dark_seconds));
+        log(&format!("P{} final hit: start (seconds {} spin {} turns {} pitch {} distance {} smooth {} reissue {} step {} yaw0 {} flash {} dark {})",
+            entry + 1, c.seconds, c.spin, c.turns, c.pitch, c.distance, c.smooth, c.reissue, c.step_seconds, c.yaw_offset, c.flash, c.dark_seconds));
     }
 
     unsafe fn finish(fighter: &mut L2CFighterCommon, entry: usize, why: &str) {
@@ -561,8 +570,16 @@ dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that 
             }
         }
         if c.spin {
-            let yaw = 360.0 * c.turns * t / c.seconds;
-            camera(fighter, &c, yaw);
+            // one new angle per step (or every frame with step_seconds = 0), aimed at where the
+            // orbit will be when the camera finishes gliding there
+            let step = if c.step_seconds > 0.0 { (t / c.step_seconds) as i32 } else { -2 };
+            if step == -2 || step != LAST_STEP[entry] {
+                LAST_STEP[entry] = step;
+                let at = if step >= 0 { (step + 1) as f32 * c.step_seconds } else { t };
+                let yaw = c.yaw_offset + 360.0 * c.turns * at / c.seconds;
+                camera(fighter, &c, yaw);
+            }
+            let yaw = c.yaw_offset + 360.0 * c.turns * t / c.seconds;
             if t - LAST_LOG[entry] >= 0.5 {
                 LAST_LOG[entry] = t;
                 log(&format!("P{} final hit: t {:.2} yaw {:.0}", entry + 1, t, yaw));

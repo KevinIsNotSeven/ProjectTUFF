@@ -15,7 +15,7 @@ Smash can't add new item types, so this mod gives the existing items random vari
 | Soccer ball | normal | **NormalSoccer** texture | unchanged |
 | Soccer ball | spike | **SpikeSoccer** texture (purple) | launches you down (280°) |
 | Soccer ball | launch | **LaunchSoccer** texture (yellow) | launches you straight up (90°) |
-| Soccer ball | gravity | **GravitySoccer** texture (cyan) | strongly pulls fighters toward it while it's out: radius 90, up to 1.6 units/frame (beats walking), staying strong over most of the radius; standing/walking/running/crouching fighters get yanked off the ground when it's above them |
+| Soccer ball | gravity | **GravitySoccer** texture (cyan) | strongly pulls fighters toward it while it's out: radius 70, up to 1.1 units/frame (about walking speed), staying strong over most of the radius; standing/walking/running/crouching fighters get yanked off the ground when it's above them |
 
 Variants are rolled randomly (system-clock xorshift) the first time the plugin sees an item, and remembered per object id; entries unseen for 1 s expire because ids restart every match.
 
