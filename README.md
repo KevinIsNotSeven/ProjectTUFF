@@ -13,6 +13,7 @@ A set of tweaks for **Super Smash Bros. Ultimate 13.0.4** layered on top of **[H
 | **Little Mac dash attack.** He trips and throws a hitbox forward, Villager-style, with his hoodie as the visible projectile. | `hdr-melee-fox-dev/source/littlemac_trip` |
 | **Melee Fox.** Melee stats, cancel frames and hitboxes. | `hdr-melee-fox-dev/source/melee_fox` (hitboxes); the stats and cancel frames are in the `hdr-melee-fox` mod on the SD card |
 | **Custom logos** replacing HDR's on the title screen, matchup screen and launcher. | Artwork in `custom logo/` |
+| **Red menu theme.** HDR's green menus, Ready/GAME! text, loading spinner and launcher are red. Only green HDR added is changed; the game's own greens (player 4, green team, gauges) stay. | `hdr-melee-fox-dev/source/recolor_ui` |
 
 More detail is in each folder's `NOTES.md` and in [hdr-melee-fox-dev/source/README.md](hdr-melee-fox-dev/source/README.md). [CLAUDE_HANDOFF.md](CLAUDE_HANDOFF.md) has the full development history.
 
@@ -42,6 +43,7 @@ hdr-melee-fox-dev/source/   source for every plugin and tool
   bumper_model/               builds the bumper model with extra texture variants
   nus3tool/                   patches and extracts tracks in .nus3audio / .patch3audio banks
   skin_installer/             installs a folder of skins with slot-conflict handling
+  recolor_ui/                 turns HDR's green menu theme red (layouts + launcher)
 bumper-texture/             bumper textures and sounds (custom/) + the original
 soccer-texture/             soccer ball variant textures (edit the PNGs, run convert-to-game.bat)
 custom logo/                logo artwork
