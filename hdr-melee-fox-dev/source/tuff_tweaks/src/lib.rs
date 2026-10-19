@@ -320,7 +320,8 @@ mod auto_tech {
 mod final_hit {
     //! HDR's final-hit moment (the game-ending KO), made bigger:
     //! - lasts longer (the slow motion is kept going);
-    //! - a full-screen flash that strobes red / blue;
+    //! - HDR's lightning background (normally in the attacker's team color) flips between its
+    //!   red and blue versions;
     //! - the camera orbits around the fighter who got hit;
     //! - the sound is the bumper's "KUNG", slowed to 0.7x. That part is a file, not code: it
     //!   replaces `se_common_boss_down` in parry-sound's se_common.patch3audio.
@@ -339,13 +340,18 @@ mod final_hit {
     //! it circles from above, looking down.
     use super::*;
     use smash::app::sv_animcmd;
-    use smash::phx::{Hash40, Vector3f};
+    use smash::phx::Hash40;
     use smash_script::lua_args;
 
     const CONFIG_PATH: &str = "sd:/tuff_final_hit.txt";
     const SLOW_MUL: u8 = 8; // same slow motion as HDR
-    const RED: (f32, f32, f32) = (1.0, 0.08, 0.08);
-    const BLUE: (f32, f32, f32) = (0.1, 0.25, 1.0);
+    /// The two backgrounds the strobe flips between (HDR's team-color versions of the final-hit
+    /// background), and every version that might be showing.
+    const STROBE: [&str; 2] = ["sys_bg_finishhit_r", "sys_bg_finishhit_b"];
+    const ALL_BACKGROUNDS: [&str; 9] = [
+        "sys_bg_finishhit", "sys_bg_finishhit_r", "sys_bg_finishhit_b", "sys_bg_finishhit_y", "sys_bg_finishhit_g",
+        "sys_bg_finishhit_o", "sys_bg_finishhit_c", "sys_bg_finishhit_m", "sys_bg_finishhit_p",
+    ];
     /// Status work slot the camera reads the target id from. Damage statuses use slots up to
     /// 0x16 and other statuses go up to 0x19, so 0x18 is free while the fighter is launched.
     const TARGET_WORK_INT: i32 = 0x11000018;
@@ -371,14 +377,14 @@ mod final_hit {
         seconds: 3.0,
         spin: true,
         turns: 1.0,
-        pitch: -50.0,
+        pitch: 45.0,
         distance: 120.0,
         height: 0.0,
         smooth: 6.0,
         reissue: false,
         flash: true,
-        flash_seconds: 0.12,
-        dark_seconds: 0.6,
+        flash_seconds: 0.25,
+        dark_seconds: 99.0,
     };
 
     const CONFIG_TEXT: &str = "\
@@ -388,18 +394,18 @@ mod final_hit {
 seconds = 3.0          # how long the final hit lasts (HDR's own is about 1)
 spin = 1               # 1 = camera orbits the hit fighter, 0 = no camera movement
 turns = 1.0            # 1.0 = one full 360 orbit, 0.5 = half way round, -1.0 = other direction
-pitch = -50            # camera tilt in degrees. Cloud's final smash uses -10 and 20; try the
-                       # other sign if the camera ends up underneath instead of above
+pitch = 45             # camera tilt in degrees; positive = above, looking down (negative put
+                       # the camera under the stage)
 distance = 120         # camera distance (Cloud's final smash uses 160-195; smaller = closer)
 height = 0             # raise / lower the point the camera looks at
 smooth = 6             # frames the camera takes to catch up with the moving angle. Cloud's
                        # final smash swings its camera with 10; 0 made the camera stay put
 reissue = 0            # 1 = reset and re-aim the camera every frame (try this if it still
                        # won't turn with smooth > 0)
-flash = 1              # 1 = red/blue strobe on screen, 0 = off
-flash_seconds = 0.12   # length of each red / blue flash
-dark_seconds = 0.6     # HDR blacks out the stage at the final hit; switch that off after this
-                       # many seconds (use a big number to keep it the whole time)
+flash = 1              # 1 = background flips red / blue, 0 = HDR's normal team color
+flash_seconds = 0.25   # how long each red / blue lasts
+dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that off after this
+                       # many seconds (99 = keep it the whole time, like HDR)
 ";
 
     fn parse_bool(v: &str) -> bool {
@@ -441,9 +447,18 @@ dark_seconds = 0.6     # HDR blacks out the stage at the final hit; switch that 
     static mut CONFIG: Config = DEFAULTS;
     static mut START: [u64; MAX_ENTRIES] = [0; MAX_ENTRIES]; // 0 = not running
     static mut WAS_PLAYING: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
-    static mut SCREEN: [u32; MAX_ENTRIES] = [0; MAX_ENTRIES];
+    static mut SHOWN: [i32; MAX_ENTRIES] = [-1; MAX_ENTRIES]; // which STROBE background is up
     static mut LAST_LOG: [f32; MAX_ENTRIES] = [0.0; MAX_ENTRIES];
     static mut DARK_OFF: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
+
+    /// Starts a full-screen background effect (the final-smash / final-hit kind). Arguments as
+    /// in Meta Knight's final smash: kind, x, y, z, rot x, y, z, scale.
+    unsafe fn background(fighter: &mut L2CFighterCommon, kind: &str) {
+        fighter.clear_lua_stack();
+        lua_args!(fighter, Hash40::new(kind), 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 0.0f32, 1.0f32);
+        sv_animcmd::EFFECT_GLOBAL_BACK_GROUND(fighter.lua_state_agent);
+        fighter.clear_lua_stack();
+    }
 
     /// Turns off every effect of one kind, the way HDR ends its own final-hit backgrounds.
     unsafe fn effect_off(fighter: &mut L2CFighterCommon, kind: &str) {
@@ -472,15 +487,10 @@ dark_seconds = 0.6     # HDR blacks out the stage at the final hit; switch that 
         fighter.clear_lua_stack();
     }
 
-    unsafe fn start(fighter: &mut L2CFighterCommon, entry: usize) {
-        let boma = fighter.module_accessor;
+    unsafe fn start(entry: usize) {
         CONFIG = load_config();
         let c = CONFIG;
-        if c.flash {
-            let handle = EffectModule::req_screen(boma, Hash40::new("bg_finishhit"), false, true, true) as u32;
-            EffectModule::set_billboard(boma, handle, true);
-            SCREEN[entry] = handle;
-        }
+        SHOWN[entry] = -1;
         START[entry] = now();
         LAST_LOG[entry] = 0.0;
         DARK_OFF[entry] = false;
@@ -492,7 +502,10 @@ dark_seconds = 0.6     # HDR blacks out the stage at the final hit; switch that 
         let boma = fighter.module_accessor;
         let c = CONFIG;
         if c.flash {
-            EffectModule::remove_screen(boma, Hash40::new("bg_finishhit"), 0);
+            for k in ALL_BACKGROUNDS {
+                effect_off(fighter, k);
+            }
+            effect_off(fighter, "sys_bg_black");
         }
         if c.spin {
             fighter.clear_lua_stack();
@@ -512,7 +525,7 @@ dark_seconds = 0.6     # HDR blacks out the stage at the final hit; switch that 
         }
         let playing = SoundModule::is_playing(boma, Hash40::new("se_common_boss_down"));
         if playing && !WAS_PLAYING[entry] && START[entry] == 0 {
-            start(fighter, entry);
+            start(entry);
         }
         WAS_PLAYING[entry] = playing;
         if START[entry] == 0 {
@@ -538,11 +551,14 @@ dark_seconds = 0.6     # HDR blacks out the stage at the final hit; switch that 
             SlowModule::set_whole(boma, SLOW_MUL, 30);
         }
         if c.flash {
-            let (r, g, b) = if (t / c.flash_seconds) as u32 % 2 == 0 { RED } else { BLUE };
-            EffectModule::set_rgb(boma, SCREEN[entry], r, g, b);
-            // grow outward like HDR's own version of this effect (it scales 1.7 -> 5)
-            let scale = 1.7 + 3.3 * (t / c.seconds);
-            EffectModule::set_scale(boma, SCREEN[entry], &Vector3f { x: scale, y: 1.0, z: scale });
+            let pick = (t / c.flash_seconds) as i32 % 2;
+            if pick != SHOWN[entry] {
+                SHOWN[entry] = pick;
+                for k in ALL_BACKGROUNDS {
+                    effect_off(fighter, k);
+                }
+                background(fighter, STROBE[pick as usize]);
+            }
         }
         if c.spin {
             let yaw = 360.0 * c.turns * t / c.seconds;
