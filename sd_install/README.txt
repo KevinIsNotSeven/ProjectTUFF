@@ -20,6 +20,6 @@ Currently pending:
   - ultimate\mods\skin-funky-kong: Donkey Kong c05.
   - ultimate\mods\skin-groovy-lucas: Lucas c07.
   - atmosphere\...\plugins\libtuff_tweaks.nro also has the bigger final hit (3 s, red/blue strobe,
-    360-degree camera spin). If the spin misbehaves, create an empty file SD:\tuff_no_spin.txt.
+    camera orbit). Tune it in SD:\tuff_final_hit.txt (spin = 0 turns the orbit off).
   - ultimate\mods\parry-sound\...\se_common.patch3audio: final-hit sound = slowed bumper KUNG
     (keeps HDR's amiibo sound and the parry sound).

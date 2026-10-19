@@ -15,7 +15,8 @@
 //!   are loaded, so it's the same situation as a normal swallow (copying an absent fighter could
 //!   reference files that aren't loaded).
 //! - **Auto-tech toggle** per player (see auto_tech).
-//! - **Bigger final hit**: longer, red/blue strobe, 360-degree camera orbit (see final_hit).
+//! - **Bigger final hit**: longer, red/blue strobe, camera orbit (see final_hit; tunable in
+//!   sd:/tuff_final_hit.txt).
 
 use smash::app::{self, lua_bind::*, BattleObjectModuleAccessor};
 use smash::lib::lua_const::*;
@@ -288,9 +289,6 @@ mod auto_tech {
         if !ENABLED[entry] || prev == status {
             return;
         }
-        if is_launched(prev) || status == *FIGHTER_STATUS_KIND_DOWN {
-            log(&format!("P{} status {:#x} -> {:#x}", entry + 1, prev, status));
-        }
 
         let tech = if status == *FIGHTER_STATUS_KIND_DOWN && is_launched(prev) {
             let stick_x = ControlModule::get_stick_x(boma);
@@ -321,77 +319,157 @@ mod auto_tech {
 
 mod final_hit {
     //! HDR's final-hit moment (the game-ending KO), made bigger:
-    //! - lasts SECONDS instead of HDR's ~1 second (the slow motion is kept going);
+    //! - lasts longer (the slow motion is kept going);
     //! - a full-screen flash that strobes red / blue;
-    //! - the camera orbits 360 degrees around the fighter who got hit (SPIN, experimental);
+    //! - the camera orbits around the fighter who got hit;
     //! - the sound is the bumper's "KUNG", slowed to 0.7x. That part is a file, not code: it
     //!   replaces `se_common_boss_down` in parry-sound's se_common.patch3audio.
+    //!
+    //! Everything is tunable without rebuilding in sd:/tuff_final_hit.txt (written with the
+    //! defaults the first time it's missing, read again at every final hit).
     //!
     //! HDR plays `se_common_boss_down` on the KO'd fighter at the exact moment of the final hit,
     //! so this watches for that sound starting. Timing uses the system clock, not frames, because
     //! everything runs in slow motion during the effect.
+    //!
+    //! The orbit uses the final-smash camera command (CAM_ZOOM_IN_FINAL). Its arguments were
+    //! worked out from Cloud's final smash: x, y, yaw, pitch, distance, flag, status work slot
+    //! holding the target's object id, smoothing frames. A level orbit (pitch near 0) swings the
+    //! camera beside and behind the stage, where the stage itself blocks the view, so by default
+    //! it circles from above, looking down.
     use super::*;
     use smash::app::sv_animcmd;
-    use smash::phx::Hash40;
+    use smash::phx::{Hash40, Vector3f};
     use smash_script::lua_args;
 
-    const SECONDS: f32 = 3.0;
+    const CONFIG_PATH: &str = "sd:/tuff_final_hit.txt";
     const SLOW_MUL: u8 = 8; // same slow motion as HDR
-    const FLASH_SECONDS: f32 = 0.12; // how long each red / blue flash lasts
     const RED: (f32, f32, f32) = (1.0, 0.08, 0.08);
     const BLUE: (f32, f32, f32) = (0.1, 0.25, 1.0);
-
-    /// 360-degree camera orbit. Uses the final-smash camera command (CAM_ZOOM_IN_FINAL), whose
-    /// arguments were worked out from Cloud's final smash: x, y, yaw, pitch, distance, flag,
-    /// status work slot holding the target's object id, smoothing frames. Set to false if it
-    /// misbehaves; the rest still works. It's also skipped while sd:/tuff_no_spin.txt exists,
-    /// so it can be turned off without rebuilding.
-    const SPIN: bool = true;
-    static mut SPIN_NOW: bool = false;
-    const CAM_PITCH: f32 = -10.0;
-    const CAM_DISTANCE: f32 = 150.0;
     /// Status work slot the camera reads the target id from. Damage statuses use slots up to
     /// 0x16 and other statuses go up to 0x19, so 0x18 is free while the fighter is launched.
     const TARGET_WORK_INT: i32 = 0x11000018;
-
     const TICKS_PER_SECOND: f32 = 19_200_000.0;
     const MAX_ENTRIES: usize = 8;
 
+    #[derive(Clone, Copy)]
+    struct Config {
+        seconds: f32,
+        spin: bool,
+        turns: f32,
+        pitch: f32,
+        distance: f32,
+        height: f32,
+        smooth: f32,
+        flash: bool,
+        flash_seconds: f32,
+    }
+
+    const DEFAULTS: Config = Config {
+        seconds: 3.0,
+        spin: true,
+        turns: 1.0,
+        pitch: -50.0,
+        distance: 120.0,
+        height: 0.0,
+        smooth: 0.0,
+        flash: true,
+        flash_seconds: 0.12,
+    };
+
+    const CONFIG_TEXT: &str = "\
+# Project TUFF - final hit settings. Read at every final hit, no rebuild needed.
+# Lines are  name = value  ; anything after # is ignored.
+
+seconds = 3.0          # how long the final hit lasts (HDR's own is about 1)
+spin = 1               # 1 = camera orbits the hit fighter, 0 = no camera movement
+turns = 1.0            # 1.0 = one full 360 orbit, 0.5 = half way round, -1.0 = other direction
+pitch = -50            # camera tilt in degrees. Cloud's final smash uses -10 and 20; try the
+                       # other sign if the camera ends up underneath instead of above
+distance = 120         # camera distance (Cloud's final smash uses 160-195; smaller = closer)
+height = 0             # raise / lower the point the camera looks at
+smooth = 0             # camera smoothing frames
+flash = 1              # 1 = red/blue strobe on screen, 0 = off
+flash_seconds = 0.12   # length of each red / blue flash
+";
+
+    fn parse_bool(v: &str) -> bool {
+        matches!(v, "1" | "true" | "on" | "yes")
+    }
+
+    fn load_config() -> Config {
+        let text = match std::fs::read_to_string(CONFIG_PATH) {
+            Ok(t) => t,
+            Err(_) => {
+                let _ = std::fs::write(CONFIG_PATH, CONFIG_TEXT);
+                return DEFAULTS;
+            }
+        };
+        let mut c = DEFAULTS;
+        for line in text.lines() {
+            let line = line.split('#').next().unwrap_or("");
+            let Some((k, v)) = line.split_once('=') else { continue };
+            let (k, v) = (k.trim(), v.trim());
+            let f = v.parse::<f32>().ok();
+            match (k, f) {
+                ("seconds", Some(x)) => c.seconds = x.clamp(0.2, 20.0),
+                ("turns", Some(x)) => c.turns = x,
+                ("pitch", Some(x)) => c.pitch = x,
+                ("distance", Some(x)) => c.distance = x,
+                ("height", Some(x)) => c.height = x,
+                ("smooth", Some(x)) => c.smooth = x,
+                ("flash_seconds", Some(x)) => c.flash_seconds = x.max(0.02),
+                ("spin", _) => c.spin = parse_bool(v),
+                ("flash", _) => c.flash = parse_bool(v),
+                _ => {}
+            }
+        }
+        c
+    }
+
+    static mut CONFIG: Config = DEFAULTS;
     static mut START: [u64; MAX_ENTRIES] = [0; MAX_ENTRIES]; // 0 = not running
     static mut WAS_PLAYING: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
     static mut SCREEN: [u32; MAX_ENTRIES] = [0; MAX_ENTRIES];
+    static mut LAST_LOG: [f32; MAX_ENTRIES] = [0.0; MAX_ENTRIES];
 
     fn now() -> u64 {
         unsafe { skyline::nn::os::GetSystemTick() }
     }
 
-    unsafe fn camera(fighter: &mut L2CFighterCommon, yaw: f32) {
+    unsafe fn camera(fighter: &mut L2CFighterCommon, c: &Config, yaw: f32) {
         let boma = fighter.module_accessor;
         let id = (*fighter.battle_object).battle_object_id;
         WorkModule::set_int(boma, id as i32, TARGET_WORK_INT);
-        let yaw = if yaw > 180.0 { yaw - 360.0 } else { yaw };
+        let yaw = (yaw + 180.0).rem_euclid(360.0) - 180.0;
         fighter.clear_lua_stack();
-        lua_args!(fighter, 0.0f32, 0.0f32, yaw, CAM_PITCH, CAM_DISTANCE, true, TARGET_WORK_INT, 0.0f32);
+        lua_args!(fighter, 0.0f32, c.height, yaw, c.pitch, c.distance, true, TARGET_WORK_INT, c.smooth);
         sv_animcmd::CAM_ZOOM_IN_FINAL(fighter.lua_state_agent);
         fighter.clear_lua_stack();
     }
 
     unsafe fn start(fighter: &mut L2CFighterCommon, entry: usize) {
         let boma = fighter.module_accessor;
-        let handle = EffectModule::req_screen(boma, Hash40::new("bg_finishhit"), false, true, true) as u32;
-        EffectModule::set_billboard(boma, handle, true);
-        SCREEN[entry] = handle;
+        CONFIG = load_config();
+        let c = CONFIG;
+        if c.flash {
+            let handle = EffectModule::req_screen(boma, Hash40::new("bg_finishhit"), false, true, true) as u32;
+            EffectModule::set_billboard(boma, handle, true);
+            SCREEN[entry] = handle;
+        }
         START[entry] = now();
-        SPIN_NOW = SPIN && !std::path::Path::new("sd:/tuff_no_spin.txt").exists();
-        let spin = SPIN_NOW;
-        log(&format!("P{} final hit: start (screen {:#x}, slow mag {} frame {}, spin {})", entry + 1, handle,
-            SlowModule::whole_mag(boma), SlowModule::whole_frame(boma), spin));
+        LAST_LOG[entry] = 0.0;
+        log(&format!("P{} final hit: start (seconds {} spin {} turns {} pitch {} distance {} flash {})",
+            entry + 1, c.seconds, c.spin, c.turns, c.pitch, c.distance, c.flash));
     }
 
     unsafe fn finish(fighter: &mut L2CFighterCommon, entry: usize, why: &str) {
         let boma = fighter.module_accessor;
-        EffectModule::remove_screen(boma, Hash40::new("bg_finishhit"), 0);
-        if SPIN_NOW {
+        let c = CONFIG;
+        if c.flash {
+            EffectModule::remove_screen(boma, Hash40::new("bg_finishhit"), 0);
+        }
+        if c.spin {
             fighter.clear_lua_stack();
             sv_animcmd::CAM_ZOOM_OUT_FINAL(fighter.lua_state_agent);
             fighter.clear_lua_stack();
@@ -416,9 +494,10 @@ mod final_hit {
             return;
         }
 
+        let c = CONFIG;
         let t = now().wrapping_sub(START[entry]) as f32 / TICKS_PER_SECOND;
         let status = StatusModule::status_kind(boma);
-        if t >= SECONDS {
+        if t >= c.seconds {
             return finish(fighter, entry, "time");
         }
         if status == *FIGHTER_STATUS_KIND_DEAD || status == *FIGHTER_STATUS_KIND_REBIRTH || status == *FIGHTER_STATUS_KIND_STANDBY {
@@ -428,10 +507,20 @@ mod final_hit {
         if SlowModule::whole_mag(boma) <= 1 {
             SlowModule::set_whole(boma, SLOW_MUL, 30);
         }
-        let (r, g, b) = if (t / FLASH_SECONDS) as u32 % 2 == 0 { RED } else { BLUE };
-        EffectModule::set_rgb(boma, SCREEN[entry], r, g, b);
-        if SPIN_NOW {
-            camera(fighter, 360.0 * t / SECONDS);
+        if c.flash {
+            let (r, g, b) = if (t / c.flash_seconds) as u32 % 2 == 0 { RED } else { BLUE };
+            EffectModule::set_rgb(boma, SCREEN[entry], r, g, b);
+            // grow outward like HDR's own version of this effect (it scales 1.7 -> 5)
+            let scale = 1.7 + 3.3 * (t / c.seconds);
+            EffectModule::set_scale(boma, SCREEN[entry], &Vector3f { x: scale, y: 1.0, z: scale });
+        }
+        if c.spin {
+            let yaw = 360.0 * c.turns * t / c.seconds;
+            camera(fighter, &c, yaw);
+            if t - LAST_LOG[entry] >= 0.5 {
+                LAST_LOG[entry] = t;
+                log(&format!("P{} final hit: t {:.2} yaw {:.0}", entry + 1, t, yaw));
+            }
         }
     }
 
@@ -442,6 +531,7 @@ mod final_hit {
 
 #[skyline::main(name = "tuff_tweaks")]
 pub fn main() {
+    let _ = std::fs::write("sd:/tuff_tweaks_log.txt", "tuff_tweaks loaded\n");
     vanilla_acmd::krool::install();
     vanilla_acmd::krool_backpack::install();
     vanilla_acmd::krool_crown::install();
