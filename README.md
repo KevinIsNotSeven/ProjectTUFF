@@ -22,9 +22,15 @@ More detail is in each folder's `NOTES.md` and in [hdr-melee-fox-dev/source/READ
 
 The installer copies everything in `sd_install/`, which is laid out exactly like the SD card. It finds the SD card on its own and backs up any file it replaces to `SD:\hdr-melee-fox-dev\backup\installer-<date>\`. It also turns on the mods listed in `sd_install/enable_mods.txt` in the ARCropolis preset. Running it again is safe.
 
+### Skins
+Put downloaded skins (unzipped, one folder per skin) in `TuffCharacterSkins` at the root of the SD card. Then double-click **`Install Skins.bat`**. It shows what it will do and asks before installing.
+
+Each skin becomes its own mod, `ultimate/mods/skin-<name>`. Skins already on the card keep their costume slots: a new skin for a slot that's already taken is skipped as a whole. That way you never end up with one skin's model and another skin's voice. The script also cleans out readmes and macOS junk, and removes config entries that point at missing files, since those can stop ARCropolis from loading a mod. The rules are explained at the top of [install_skins.py](hdr-melee-fox-dev/source/skin_installer/install_skins.py).
+
 ## Folder layout
 ```
 Install to SD.bat           runs sd_install/install.ps1
+Install Skins.bat           installs SD:\TuffCharacterSkins (runs skin_installer/install_skins.py)
 sd_install/                 files waiting to go onto the SD card (SD card layout)
 hdr-melee-fox-dev/source/   source for every plugin and tool
   item_variants/              bumper / soccer ball variants (plugin + mod files)
@@ -35,6 +41,7 @@ hdr-melee-fox-dev/source/   source for every plugin and tool
   layout_tex/                 swaps textures inside layout.arc (BNTX) files
   bumper_model/               builds the bumper model with extra texture variants
   nus3tool/                   patches and extracts tracks in .nus3audio / .patch3audio banks
+  skin_installer/             installs a folder of skins with slot-conflict handling
 bumper-texture/             bumper textures and sounds (custom/) + the original
 custom logo/                logo artwork
 ```
@@ -55,7 +62,7 @@ Some things to know:
 - **Status scripts can't be reverted the normal way.** smashline has no priority for status scripts, so the last plugin to register one wins, and HDR's plugin loads last. `tuff_tweaks` writes the game's own status functions back into the status table instead.
 
 ## Not included
-- **Character skins** (Melee Fox v2, 64 Fox, Fox 85622, Funky Kong, Groovy Lucas) are made by other people, so they aren't in this repo. Download them from their original pages and put the archives in `CharacterSkins/`. The installer skips any skin folders that are missing.
+- **Character skins** are made by other people, so they aren't in this repo. That covers the skins installed by `Install to SD.bat` (Melee Fox v2, 64 Fox, Fox 85622, Funky Kong, Groovy Lucas) and everything in `TuffCharacterSkins`. Download them from their original pages. The installers skip any skins that are missing.
 - **Some files exist only on the SD card for now.** These are the `hdr-melee-fox` mod, the edited `fighter_param.prcxml`, the logo-patched `layout.arc`, `.eff` and launcher files, and the K. Rool file removals. They're described in [CLAUDE_HANDOFF.md](CLAUDE_HANDOFF.md) and the NOTES files.
 
 ## Contributing
