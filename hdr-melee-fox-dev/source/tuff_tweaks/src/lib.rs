@@ -380,14 +380,14 @@ mod final_hit {
     const DEFAULTS: Config = Config {
         seconds: 3.0,
         spin: true,
-        turns: 1.0,
-        pitch: 45.0,
-        distance: 120.0,
+        turns: 0.0,
+        pitch: 10.0,
+        distance: 100.0,
         height: 0.0,
         smooth: 10.0,
-        reissue: true,
+        reissue: false,
         step_seconds: 0.25,
-        yaw_offset: 180.0,
+        yaw_offset: 200.0,
         flash: true,
         flash_seconds: 0.25,
         dark_seconds: 99.0,
@@ -398,17 +398,18 @@ mod final_hit {
 # Lines are  name = value  ; anything after # is ignored.
 
 seconds = 3.0          # how long the final hit lasts (HDR's own is about 1)
-spin = 1               # 1 = camera orbits the hit fighter, 0 = no camera movement
-turns = 1.0            # 1.0 = one full 360 orbit, 0.5 = half way round, -1.0 = other direction
-pitch = 45             # camera tilt in degrees; positive = above, looking down (negative put
+spin = 1               # 1 = final-smash style camera on the hit fighter, 0 = normal camera
+turns = 0              # 0 = hold one angle (works). Anything else tries to orbit, but the
+                       # game's final-smash camera can only be aimed once, so it doesn't turn
+pitch = 10             # camera tilt in degrees; positive = above, looking down (negative puts
                        # the camera under the stage)
-distance = 120         # camera distance (Cloud's final smash uses 160-195; smaller = closer)
+distance = 100         # camera distance (Cloud's final smash uses 160-195; smaller = closer)
 height = 0             # raise / lower the point the camera looks at
 smooth = 10            # frames the camera takes to glide to each new angle
-reissue = 1            # 1 = CAM_ZOOM_OUT then CAM_ZOOM_IN_FINAL at each new angle, the way the
-                       # game's final smashes aim the camera. With 0 only the first angle stuck
+reissue = 0            # orbit experiment: 1 = CAM_ZOOM_OUT before each new angle (that only
+                       # zoomed the camera far out in testing)
 step_seconds = 0.25    # how often the camera gets a new angle (0 = every frame)
-yaw_offset = 180       # where the orbit starts; 0 was behind the fighter, so 180 = in front
+yaw_offset = 200       # camera angle around the fighter: 180 = straight in front, 0 = behind
 flash = 1              # 1 = background flips red / blue, 0 = HDR's normal team color
 flash_seconds = 0.25   # how long each red / blue lasts
 dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that off after this
@@ -576,7 +577,13 @@ dark_seconds = 99      # HDR blacks out the stage at the final hit; switch that 
         if c.spin {
             // one new angle per step (or every frame with step_seconds = 0), aimed at where the
             // orbit will be when the camera finishes gliding there
-            let step = if c.step_seconds > 0.0 { (t / c.step_seconds) as i32 } else { -2 };
+            let step = if c.turns == 0.0 {
+                0 // hold one angle: aim once
+            } else if c.step_seconds > 0.0 {
+                (t / c.step_seconds) as i32
+            } else {
+                -2
+            };
             if step == -2 || step != LAST_STEP[entry] {
                 LAST_STEP[entry] = step;
                 let at = if step >= 0 { (step + 1) as f32 * c.step_seconds } else { t };
