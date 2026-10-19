@@ -361,8 +361,10 @@ mod final_hit {
         distance: f32,
         height: f32,
         smooth: f32,
+        reissue: bool,
         flash: bool,
         flash_seconds: f32,
+        dark_seconds: f32,
     }
 
     const DEFAULTS: Config = Config {
@@ -372,9 +374,11 @@ mod final_hit {
         pitch: -50.0,
         distance: 120.0,
         height: 0.0,
-        smooth: 0.0,
+        smooth: 6.0,
+        reissue: false,
         flash: true,
         flash_seconds: 0.12,
+        dark_seconds: 0.6,
     };
 
     const CONFIG_TEXT: &str = "\
@@ -388,9 +392,14 @@ pitch = -50            # camera tilt in degrees. Cloud's final smash uses -10 an
                        # other sign if the camera ends up underneath instead of above
 distance = 120         # camera distance (Cloud's final smash uses 160-195; smaller = closer)
 height = 0             # raise / lower the point the camera looks at
-smooth = 0             # camera smoothing frames
+smooth = 6             # frames the camera takes to catch up with the moving angle. Cloud's
+                       # final smash swings its camera with 10; 0 made the camera stay put
+reissue = 0            # 1 = reset and re-aim the camera every frame (try this if it still
+                       # won't turn with smooth > 0)
 flash = 1              # 1 = red/blue strobe on screen, 0 = off
 flash_seconds = 0.12   # length of each red / blue flash
+dark_seconds = 0.6     # HDR blacks out the stage at the final hit; switch that off after this
+                       # many seconds (use a big number to keep it the whole time)
 ";
 
     fn parse_bool(v: &str) -> bool {
@@ -418,6 +427,8 @@ flash_seconds = 0.12   # length of each red / blue flash
                 ("distance", Some(x)) => c.distance = x,
                 ("height", Some(x)) => c.height = x,
                 ("smooth", Some(x)) => c.smooth = x,
+                ("dark_seconds", Some(x)) => c.dark_seconds = x,
+                ("reissue", _) => c.reissue = parse_bool(v),
                 ("flash_seconds", Some(x)) => c.flash_seconds = x.max(0.02),
                 ("spin", _) => c.spin = parse_bool(v),
                 ("flash", _) => c.flash = parse_bool(v),
@@ -432,6 +443,15 @@ flash_seconds = 0.12   # length of each red / blue flash
     static mut WAS_PLAYING: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
     static mut SCREEN: [u32; MAX_ENTRIES] = [0; MAX_ENTRIES];
     static mut LAST_LOG: [f32; MAX_ENTRIES] = [0.0; MAX_ENTRIES];
+    static mut DARK_OFF: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
+
+    /// Turns off every effect of one kind, the way HDR ends its own final-hit backgrounds.
+    unsafe fn effect_off(fighter: &mut L2CFighterCommon, kind: &str) {
+        fighter.clear_lua_stack();
+        lua_args!(fighter, Hash40::new(kind), false, false);
+        sv_animcmd::EFFECT_OFF_KIND(fighter.lua_state_agent);
+        fighter.clear_lua_stack();
+    }
 
     fn now() -> u64 {
         unsafe { skyline::nn::os::GetSystemTick() }
@@ -443,6 +463,10 @@ flash_seconds = 0.12   # length of each red / blue flash
         WorkModule::set_int(boma, id as i32, TARGET_WORK_INT);
         let yaw = (yaw + 180.0).rem_euclid(360.0) - 180.0;
         fighter.clear_lua_stack();
+        if c.reissue {
+            sv_animcmd::CAM_ZOOM_OUT_FINAL(fighter.lua_state_agent);
+            fighter.clear_lua_stack();
+        }
         lua_args!(fighter, 0.0f32, c.height, yaw, c.pitch, c.distance, true, TARGET_WORK_INT, c.smooth);
         sv_animcmd::CAM_ZOOM_IN_FINAL(fighter.lua_state_agent);
         fighter.clear_lua_stack();
@@ -459,8 +483,9 @@ flash_seconds = 0.12   # length of each red / blue flash
         }
         START[entry] = now();
         LAST_LOG[entry] = 0.0;
-        log(&format!("P{} final hit: start (seconds {} spin {} turns {} pitch {} distance {} flash {})",
-            entry + 1, c.seconds, c.spin, c.turns, c.pitch, c.distance, c.flash));
+        DARK_OFF[entry] = false;
+        log(&format!("P{} final hit: start (seconds {} spin {} turns {} pitch {} distance {} smooth {} reissue {} flash {} dark {})",
+            entry + 1, c.seconds, c.spin, c.turns, c.pitch, c.distance, c.smooth, c.reissue, c.flash, c.dark_seconds));
     }
 
     unsafe fn finish(fighter: &mut L2CFighterCommon, entry: usize, why: &str) {
@@ -502,6 +527,11 @@ flash_seconds = 0.12   # length of each red / blue flash
         }
         if status == *FIGHTER_STATUS_KIND_DEAD || status == *FIGHTER_STATUS_KIND_REBIRTH || status == *FIGHTER_STATUS_KIND_STANDBY {
             return finish(fighter, entry, "KO'd");
+        }
+        if !DARK_OFF[entry] && t >= c.dark_seconds {
+            DARK_OFF[entry] = true;
+            effect_off(fighter, "sys_bg_black");
+            log(&format!("P{} final hit: dark stage off at {:.2}", entry + 1, t));
         }
         // HDR switches the slow motion off after ~25 frames; keep it going.
         if SlowModule::whole_mag(boma) <= 1 {

@@ -46,7 +46,7 @@ hdr-melee-fox-dev/source/   source for every plugin and tool
   skin_installer/             installs a folder of skins with slot-conflict handling
   recolor_ui/                 turns HDR's green menu theme red (layouts + launcher)
 bumper-texture/             bumper textures and sounds (custom/) + the original
-soccer-texture/             soccer ball variant textures (edit the PNGs, run convert-to-game.bat)
+soccer-texture/             soccer ball textures: one 2:1 world-map PNG per variant (run convert-to-game.bat)
 custom logo/                logo artwork
 ```
 

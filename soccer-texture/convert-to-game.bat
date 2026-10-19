@@ -4,8 +4,9 @@ rem   NormalSoccer.png  -> soccerball_col.nutexb          (normal ball)
 rem   SpikeSoccer.png   -> soccerball_spike_col.nutexb    (spike ball)
 rem   LaunchSoccer.png  -> soccerball_launch_col.nutexb   (launch ball)
 rem   GravitySoccer.png -> soccerball_gravity_col.nutexb  (gravity ball)
-rem Keep the PNGs 256x128 like the original: top half is the white hexagon panel, bottom half
-rem the black pentagon panel. Format BC7 matches the original texture.
+rem The ball is a plain sphere and each PNG wraps all the way around it like a world map:
+rem 2:1 (512x256 or bigger), the middle of the image faces the front, the left and right edges
+rem meet at the back, the top edge is the top of the ball. The grid lines are every 45 degrees.
 setlocal
 cd /d "%~dp0"
 set TEX="%~dp0..\..\..\ClaudeTools\ultimate_tex\ultimate_tex_cli.exe"
@@ -18,6 +19,7 @@ call :conv SpikeSoccer soccerball_spike_col || goto :fail
 call :conv LaunchSoccer soccerball_launch_col || goto :fail
 call :conv GravitySoccer soccerball_gravity_col || goto :fail
 copy /y "%SRC%\model.*" "%STAGE%\" >nul
+copy /y "%SRC%\soccerball_prm.nutexb" "%STAGE%\" >nul
 echo.
 echo Done. Now put the SD card in and run "Install to SD.bat".
 pause

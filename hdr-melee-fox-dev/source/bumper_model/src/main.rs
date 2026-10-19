@@ -2,13 +2,138 @@
 // bumper_model build <in dir> <out dir> <name=texture>...
 //   For each variant, adds a copy of every mesh object named "<name>_*" that uses a copy of its
 //   material with Texture0 swapped to <texture>. Renames the original meshes "normal_*".
+// bumper_model sphere <in dir> <out dir> [rings] [segments]
+//   Replaces the (single) mesh object with a UV sphere of the same center and size, so one
+//   2:1 "world map" texture wraps the whole thing: left/right edges meet at the back, the top
+//   edge is the top pole. Keeps the object's name, bone and attribute layout; copies the
+//   other model files unchanged.
 use ssbh_data::anim_data::{AnimData, GroupType, TrackValues};
 use ssbh_data::matl_data::{MatlData, ParamId};
-use ssbh_data::mesh_data::MeshData;
+use ssbh_data::mesh_data::{calculate_tangents_vec4, AttributeData, BoneInfluence, MeshData, VectorData, VertexWeight};
 use ssbh_data::meshex_data::MeshExData;
 use ssbh_data::modl_data::{ModlData, ModlEntryData};
 use ssbh_data::SsbhData;
 use std::path::Path;
+
+fn sphere(input: &Path, out: &Path, rings: u32, segments: u32) {
+    std::fs::create_dir_all(out).unwrap();
+    let mut mesh = MeshData::from_file(input.join("model.numshb")).unwrap();
+    assert_eq!(mesh.objects.len(), 1, "expected a single mesh object");
+    let o = &mut mesh.objects[0];
+
+    // center and radius of the original
+    let pts: Vec<[f32; 3]> = match &o.positions[0].data {
+        VectorData::Vector3(v) => v.clone(),
+        VectorData::Vector4(v) => v.iter().map(|p| [p[0], p[1], p[2]]).collect(),
+        VectorData::Vector2(_) => panic!("2D positions"),
+    };
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for p in &pts {
+        for i in 0..3 {
+            lo[i] = lo[i].min(p[i]);
+            hi[i] = hi[i].max(p[i]);
+        }
+    }
+    let c = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0];
+    let r = pts.iter().map(|p| ((p[0] - c[0]).powi(2) + (p[1] - c[1]).powi(2) + (p[2] - c[2]).powi(2)).sqrt()).fold(0.0f32, f32::max);
+    println!("original: {} verts, center {:?}, radius {}", pts.len(), c, r);
+
+    // UV sphere; the seam column and the pole rows are duplicated so UVs don't wrap
+    let (mut pos, mut nrm, mut uv) = (Vec::new(), Vec::new(), Vec::new());
+    for i in 0..=rings {
+        let v = i as f32 / rings as f32;
+        let theta = v * std::f32::consts::PI; // 0 at the top pole
+        for j in 0..=segments {
+            let u = j as f32 / segments as f32;
+            let phi = u * 2.0 * std::f32::consts::PI;
+            // u = 0.5 faces the camera (+z), so the middle of the texture is the front
+            let n = [-theta.sin() * phi.sin(), theta.cos(), -theta.sin() * phi.cos()];
+            pos.push([c[0] + r * n[0], c[1] + r * n[1], c[2] + r * n[2]]);
+            nrm.push(n);
+            uv.push([u, v]);
+        }
+    }
+    let row = segments + 1;
+    let mut idx = Vec::new();
+    for i in 0..rings {
+        for j in 0..segments {
+            let a = i * row + j;
+            let b = a + row;
+            idx.extend_from_slice(&[a, b, a + 1, a + 1, b, b + 1]);
+        }
+    }
+    // make the winding counter-clockwise when seen from outside
+    let tri_normal = |t: &[u32]| {
+        let (p0, p1, p2) = (pos[t[0] as usize], pos[t[1] as usize], pos[t[2] as usize]);
+        let (e1, e2) = ([p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]], [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]]);
+        [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]
+    };
+    let probe = &idx[(rings / 2 * segments * 6) as usize..][..3];
+    let (tn, center_dir) = (tri_normal(probe), pos[probe[0] as usize]);
+    let outward = tn[0] * (center_dir[0] - c[0]) + tn[1] * (center_dir[1] - c[1]) + tn[2] * (center_dir[2] - c[2]);
+    if outward < 0.0 {
+        for t in idx.chunks_mut(3) {
+            t.swap(1, 2);
+        }
+    }
+    let n = pos.len();
+
+    let like = |old: &VectorData, v3: &[[f32; 3]], w: f32| match old {
+        VectorData::Vector3(_) => VectorData::Vector3(v3.to_vec()),
+        VectorData::Vector4(_) => VectorData::Vector4(v3.iter().map(|p| [p[0], p[1], p[2], w]).collect()),
+        VectorData::Vector2(_) => panic!("2D attribute"),
+    };
+    let first4 = |d: &VectorData| match d {
+        VectorData::Vector4(v) => v[0],
+        VectorData::Vector3(v) => [v[0][0], v[0][1], v[0][2], 1.0],
+        VectorData::Vector2(v) => [v[0][0], v[0][1], 0.0, 1.0],
+    };
+    let pos_data = VectorData::Vector3(pos.clone());
+    let nrm_data = VectorData::Vector3(nrm.clone());
+    let uv_data = VectorData::Vector2(uv.clone());
+    for a in o.positions.iter_mut() {
+        a.data = like(&a.data, &pos, 1.0);
+    }
+    for a in o.normals.iter_mut() {
+        a.data = like(&a.data, &nrm, 0.0);
+    }
+    for a in o.texture_coordinates.iter_mut() {
+        a.data = VectorData::Vector2(uv.clone());
+    }
+    let tangents = calculate_tangents_vec4(&pos_data, &nrm_data, &uv_data, &idx).unwrap();
+    for a in o.tangents.iter_mut() {
+        a.data = match a.data {
+            VectorData::Vector3(_) => VectorData::Vector3(tangents.iter().map(|t| [t[0], t[1], t[2]]).collect()),
+            _ => VectorData::Vector4(tangents.clone()),
+        };
+    }
+    for a in o.binormals.iter_mut() {
+        let b: Vec<[f32; 3]> = nrm
+            .iter()
+            .zip(&tangents)
+            .map(|(n, t)| [(n[1] * t[2] - n[2] * t[1]) * t[3], (n[2] * t[0] - n[0] * t[2]) * t[3], (n[0] * t[1] - n[1] * t[0]) * t[3]])
+            .collect();
+        a.data = like(&a.data, &b, 0.0);
+    }
+    let colors: Vec<AttributeData> = o
+        .color_sets
+        .iter()
+        .map(|a| AttributeData { name: a.name.clone(), data: VectorData::Vector4(vec![first4(&a.data); n]) })
+        .collect();
+    o.color_sets = colors;
+    if let Some(bone) = o.bone_influences.first().map(|b| b.bone_name.clone()) {
+        o.bone_influences = vec![BoneInfluence {
+            bone_name: bone,
+            vertex_weights: (0..n as u32).map(|i| VertexWeight { vertex_index: i, vertex_weight: 1.0 }).collect(),
+        }];
+    }
+    o.vertex_indices = idx;
+    println!("sphere: {} verts, {} triangles", n, o.vertex_indices.len() / 3);
+    mesh.write_to_file(out.join("model.numshb")).unwrap();
+    for f in ["model.numatb", "model.numdlb", "model.numshexb", "model.nuanmb"] {
+        std::fs::copy(input.join(f), out.join(f)).unwrap();
+    }
+}
 
 fn dump(dir: &Path, anims: &[String]) {
     let mesh = MeshData::from_file(dir.join("model.numshb")).unwrap();
@@ -161,6 +286,12 @@ fn main() {
     let a: Vec<String> = std::env::args().collect();
     match a.get(1).map(|s| s.as_str()) {
         Some("dump") => dump(Path::new(&a[2]), &a[3..]),
+        Some("sphere") => sphere(
+            Path::new(&a[2]),
+            Path::new(&a[3]),
+            a.get(4).map(|s| s.parse().unwrap()).unwrap_or(24),
+            a.get(5).map(|s| s.parse().unwrap()).unwrap_or(48),
+        ),
         // anim <file.nuanmb>: translation of every transform node, every 5 frames
         Some("anim") => {
             let anim = AnimData::from_file(&a[2]).unwrap();

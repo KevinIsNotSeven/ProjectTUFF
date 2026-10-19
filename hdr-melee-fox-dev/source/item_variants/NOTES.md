@@ -24,6 +24,8 @@ Variants are rolled randomly (system-clock xorshift) the first time the plugin s
 
 **2026-10-19 update (soccer ball textures):** the soccer ball used to be tinted in code; it now works like the bumper. The model has `normal_`/`spike_`/`launch_`/`gravity_gamemodel` (`bumper_model build <stock> <out> spike=soccerball_spike_col launch=soccerball_launch_col gravity=soccerball_gravity_col`; mesh names are lowercased). The textures are edited in `Project TUFF\soccer-texture` (256x128 PNGs, BC7) and converted with its `convert-to-game.bat`. The starting PNGs are the stock texture multiplied by the old tint colors.
 
+**2026-10-19 update (sphere soccer ball):** the stock ball mesh (hexagon/pentagon atlas) was replaced with a plain UV sphere of the same center and radius (`bumper_model sphere <stock> <out>`, 24 rings x 48 segments), then split into the four variant meshes as before. Each variant texture now wraps the whole ball like a world map (2:1, middle of the image = front, top edge = top). `soccerball_prm.nutexb` is replaced with a flat average of the stock one, because the stock one is laid out for the old atlas.
+
 To play with only these, turn every other item off in the game's **Items** menu. Nothing else needs to be removed.
 
 ## Tuff bumper (texture + sound)
