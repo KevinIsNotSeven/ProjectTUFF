@@ -15,7 +15,7 @@
 //!   are loaded, so it's the same situation as a normal swallow (copying an absent fighter could
 //!   reference files that aren't loaded).
 //! - **Kirby down air**: frame-6 Melee-Falco-style spike instead of HDR's drill (see kirby_dair).
-//! - **Joker**: no Arsene landing-lag penalty, faster/longer Arsene, "1 MORE!" smash-attack
+//! - **Joker**: no Arsene landing-lag penalty, faster/longer Arsene, full-auto gun/down tilt, "1 MORE!" smash-attack
 //!   cancels (see joker).
 //! - **Auto-tech toggle** per player (see auto_tech).
 //! - **Bigger final hit**: slow-mo close-up, red/blue strobe, slow then fast zoom out (see final_hit; tunable in
@@ -419,6 +419,46 @@ mod joker {
         [*FIGHTER_STATUS_KIND_ATTACK_S4, *FIGHTER_STATUS_KIND_ATTACK_HI4, *FIGHTER_STATUS_KIND_ATTACK_LW4].contains(&status)
     }
 
+    /// The "switch": holding the button keeps the gun / down tilt firing by rewinding the
+    /// animation to just before its shot once the shot is done (the move scripts re-run from
+    /// there, so hitbox, muzzle flash and sound all repeat). Letting go plays the rest normally.
+    /// Values are animation frames from HDR's scripts (shots: gun 12, Arsene gun 12/18/24,
+    /// down tilt burst 8/18 + finisher 24, Arsene down tilt 8). Damage is in joker_switch_acmd.rs.
+    unsafe fn switch(boma: *mut BattleObjectModuleAccessor, status: i32, doyle: bool) {
+        if StopModule::is_stop(boma) {
+            return;
+        }
+        let f = MotionModule::frame(boma);
+        let rewind = if status == *FIGHTER_STATUS_KIND_SPECIAL_N {
+            if !ControlModule::check_button_on(boma, *CONTROL_PAD_BUTTON_SPECIAL) {
+                return;
+            }
+            if doyle {
+                (26.0, 11.0) // Arsene: all three shots, then again
+            } else if StatusModule::situation_kind(boma) == *SITUATION_KIND_AIR {
+                // Not before frame 21 in the air: that's where the air gun's stall ends, so
+                // looping earlier would be an endless hover.
+                (22.0, 11.0)
+            } else {
+                (17.0, 11.0) // one shot every 6 frames
+            }
+        } else if status == *FIGHTER_STATUS_KIND_ATTACK_LW3 {
+            if !ControlModule::check_button_on(boma, *CONTROL_PAD_BUTTON_ATTACK) {
+                return;
+            }
+            if MotionModule::motion_kind(boma) == smash::hash40("attack_lw3_ex") {
+                (22.0, 17.0) // spray the 1% chip shot; release for the finisher
+            } else {
+                (13.0, 7.0) // Arsene's single shot
+            }
+        } else {
+            return;
+        };
+        if f >= rewind.0 {
+            MotionModule::set_frame_sync_anim_cmd(boma, rewind.1, true, true, false);
+        }
+    }
+
     unsafe extern "C" fn frame_main(fighter: &mut L2CFighterCommon) {
         let boma: *mut BattleObjectModuleAccessor = fighter.module_accessor;
         if app::utility::get_kind(&mut *boma) != *FIGHTER_KIND_JACK {
@@ -467,6 +507,8 @@ mod joker {
             }
         }
 
+        switch(boma, status, doyle);
+
         // 1 MORE!
         if is_smash_attack(status) && hit && !StopModule::is_stop(boma) {
             if !ONE_MORE[entry] {
@@ -500,8 +542,12 @@ mod joker {
             .acmd("game_landingairlw", game_landingair_plain, Priority::High)
             .install();
         Agent::new("fighter").on_line(Main, frame_main).install();
+        super::joker_switch_acmd::install();
     }
 }
+
+// HDR's Joker gun / down tilt scripts with the "switch" damage and speed edits (generated).
+mod joker_switch_acmd;
 
 // ---- final hit, bigger ---------------------------------------------------------------------------
 
