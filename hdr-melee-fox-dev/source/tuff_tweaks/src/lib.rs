@@ -419,8 +419,8 @@ mod joker {
         [*FIGHTER_STATUS_KIND_ATTACK_S4, *FIGHTER_STATUS_KIND_ATTACK_HI4, *FIGHTER_STATUS_KIND_ATTACK_LW4].contains(&status)
     }
 
-    /// The "switch": holding the button keeps the gun / down tilt firing by rewinding the
-    /// animation to just before its shot once the shot is done (the move scripts re-run from
+    /// The "switch": holding the button keeps the gun / down tilt firing by restarting the
+    /// animation just before its shot once the shot is done (the move scripts re-run from
     /// there, so hitbox, muzzle flash and sound all repeat). Letting go plays the rest normally.
     /// Values are animation frames from HDR's scripts (shots: gun 12, Arsene gun 12/18/24,
     /// down tilt burst 8/18 + finisher 24, Arsene down tilt 8). Damage is in joker_switch_acmd.rs.
@@ -455,7 +455,12 @@ mod joker {
             return;
         };
         if f >= rewind.0 {
-            MotionModule::set_frame_sync_anim_cmd(boma, rewind.1, true, true, false);
+            // Restart the same motion part-way in. This restarts its game/effect/sound scripts
+            // (commands before the start frame are skipped by is_excute), so the shot fires
+            // again. set_frame_sync_anim_cmd only rewound the animation: the scripts didn't
+            // re-run, so it looked faster but never shot again.
+            let motion = smash::phx::Hash40 { hash: MotionModule::motion_kind(boma) };
+            MotionModule::change_motion(boma, motion, rewind.1, 1.0, false, 0.0, false, false);
         }
     }
 
