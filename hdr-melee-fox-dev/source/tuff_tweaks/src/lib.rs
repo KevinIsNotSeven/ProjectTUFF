@@ -15,6 +15,8 @@
 //!   are loaded, so it's the same situation as a normal swallow (copying an absent fighter could
 //!   reference files that aren't loaded).
 //! - **Kirby down air**: frame-6 Melee-Falco-style spike instead of HDR's drill (see kirby_dair).
+//! - **Joker**: no Arsene landing-lag penalty, faster/longer Arsene, "1 MORE!" smash-attack
+//!   cancels (see joker).
 //! - **Auto-tech toggle** per player (see auto_tech).
 //! - **Bigger final hit**: slow-mo close-up, red/blue strobe, slow then fast zoom out (see final_hit; tunable in
 //!   sd:/tuff_final_hit.txt).
@@ -375,6 +377,132 @@ mod kirby_dair {
     }
 }
 
+// ---- Joker: more Arsene, "1 MORE!" smash attacks -------------------------------------------------
+
+mod joker {
+    //! Joker fun pack, layered on HDR's Joker (his moves themselves are HDR's):
+    //! - Arsene no longer adds landing lag to Joker's aerials (HDR adds a few frames per aerial
+    //!   while Arsene is out). The landing scripts are overridden at Priority::High.
+    //! - The Rebellion Gauge fills faster: +HIT_BONUS on every move that hits (on top of HDR's
+    //!   damage-dealt meter) and a slow passive fill, while Arsene isn't out.
+    //! - Arsene stays longer: DRAIN_REFUND of his slow drain is given back each frame (damage
+    //!   taken still drains it at the normal rate).
+    //! - "1 MORE!": a smash attack that hits (not shield) can be cancelled into anything once its
+    //!   hitlag ends, with a flash and a sound, like Persona's One More.
+    //! - Arsene arriving shakes the screen.
+    use super::*;
+    use smash::app::sv_animcmd::frame;
+    use smash::phx::{Hash40, Vector3f};
+    use smash_script::macros::*;
+
+    const MAX_ENTRIES: usize = 8;
+    /// Gauge added when a move hits (HDR already adds the damage dealt).
+    const HIT_BONUS: f32 = 4.0;
+    /// Gauge added every frame while Arsene isn't out (0.02 = full from empty in ~80 s).
+    const PASSIVE_PER_FRAME: f32 = 0.02;
+    /// Share of Arsene's slow drain given back (0.5 = he lasts about twice as long).
+    const DRAIN_REFUND: f32 = 0.5;
+    /// Drops bigger than this in one frame are damage, not the slow drain, and aren't refunded.
+    const DRAIN_MAX_PER_FRAME: f32 = 1.0;
+
+    static mut PREV_HIT: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
+    static mut PREV_DOYLE: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
+    static mut PREV_GAUGE: [f32; MAX_ENTRIES] = [0.0; MAX_ENTRIES];
+    static mut ONE_MORE: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
+    static mut PREV_STATUS: [i32; MAX_ENTRIES] = [-1; MAX_ENTRIES];
+
+    unsafe fn add_gauge(boma: *mut BattleObjectModuleAccessor, entry: i32, amount: f32) {
+        app::FighterSpecializer_Jack::add_rebel_gauge(boma, app::FighterEntryID(entry), amount);
+    }
+
+    unsafe fn is_smash_attack(status: i32) -> bool {
+        [*FIGHTER_STATUS_KIND_ATTACK_S4, *FIGHTER_STATUS_KIND_ATTACK_HI4, *FIGHTER_STATUS_KIND_ATTACK_LW4].contains(&status)
+    }
+
+    unsafe extern "C" fn frame_main(fighter: &mut L2CFighterCommon) {
+        let boma: *mut BattleObjectModuleAccessor = fighter.module_accessor;
+        if app::utility::get_kind(&mut *boma) != *FIGHTER_KIND_JACK {
+            return;
+        }
+        let entry_id = WorkModule::get_int(boma, *FIGHTER_INSTANCE_WORK_ID_INT_ENTRY_ID);
+        let entry = entry_id as usize;
+        if entry >= MAX_ENTRIES {
+            return;
+        }
+        let status = StatusModule::status_kind(boma);
+        if status != PREV_STATUS[entry] {
+            PREV_STATUS[entry] = status;
+            ONE_MORE[entry] = false;
+        }
+        let doyle = WorkModule::is_flag(boma, *FIGHTER_JACK_INSTANCE_WORK_ID_FLAG_DOYLE);
+        let hit = AttackModule::is_infliction_status(boma, *COLLISION_KIND_MASK_HIT);
+        let new_hit = hit && !PREV_HIT[entry];
+        PREV_HIT[entry] = hit;
+        let zero = Vector3f { x: 0.0, y: 0.0, z: 0.0 };
+
+        // Arsene arrives
+        if doyle && !PREV_DOYLE[entry] {
+            CameraModule::req_quake(boma, *CAMERA_QUAKE_KIND_M);
+        }
+        PREV_DOYLE[entry] = doyle;
+
+        // gauge
+        if status != *FIGHTER_STATUS_KIND_ENTRY {
+            if doyle {
+                let g = WorkModule::get_float(boma, *FIGHTER_JACK_INSTANCE_WORK_ID_FLOAT_REBEL_GAUGE);
+                let drop = PREV_GAUGE[entry] - g;
+                if drop > 0.0 && drop < DRAIN_MAX_PER_FRAME && g > 0.0 {
+                    let refunded = g + drop * DRAIN_REFUND;
+                    WorkModule::set_float(boma, refunded, *FIGHTER_JACK_INSTANCE_WORK_ID_FLOAT_REBEL_GAUGE);
+                    PREV_GAUGE[entry] = refunded;
+                } else {
+                    PREV_GAUGE[entry] = g;
+                }
+            } else {
+                if new_hit {
+                    add_gauge(boma, entry_id, HIT_BONUS);
+                }
+                add_gauge(boma, entry_id, PASSIVE_PER_FRAME);
+                PREV_GAUGE[entry] = WorkModule::get_float(boma, *FIGHTER_JACK_INSTANCE_WORK_ID_FLOAT_REBEL_GAUGE);
+            }
+        }
+
+        // 1 MORE!
+        if is_smash_attack(status) && hit && !StopModule::is_stop(boma) {
+            if !ONE_MORE[entry] {
+                ONE_MORE[entry] = true;
+                let pos = Vector3f { x: 0.0, y: 12.0, z: 0.0 };
+                EffectModule::req_follow(boma, Hash40::new("sys_smash_flash"), Hash40::new("top"), &pos, &zero, 1.6, true, 0, 0, 0, 0, 0, false, false);
+                SoundModule::play_se(boma, Hash40::new("se_common_criticalhit"), true, false, false, false, app::enSEType(0));
+            }
+            CancelModule::enable_cancel(boma);
+        }
+    }
+
+    // HDR: FT_MOTION_RATE(landing + param_doyle.landing_attack_air_*_add) while Arsene is out.
+    // Ours: the normal landing lag either way.
+    unsafe extern "C" fn game_landingairn(agent: &mut L2CAgentBase) {
+        let lua_state = agent.lua_state_agent;
+        frame(lua_state, 3.0);
+        if is_excute(agent) {
+            STOP_SE(agent, Hash40::new("se_jack_attackair_n01"));
+        }
+    }
+
+    unsafe extern "C" fn game_landingair_plain(_agent: &mut L2CAgentBase) {}
+
+    pub fn install() {
+        Agent::new("jack")
+            .acmd("game_landingairn", game_landingairn, Priority::High)
+            .acmd("game_landingairf", game_landingair_plain, Priority::High)
+            .acmd("game_landingairb", game_landingair_plain, Priority::High)
+            .acmd("game_landingairhi", game_landingair_plain, Priority::High)
+            .acmd("game_landingairlw", game_landingair_plain, Priority::High)
+            .install();
+        Agent::new("fighter").on_line(Main, frame_main).install();
+    }
+}
+
 // ---- final hit, bigger ---------------------------------------------------------------------------
 
 mod final_hit {
@@ -658,6 +786,7 @@ pub fn main() {
     vanilla_acmd::dedede::install();
     kirby_copy::install();
     kirby_dair::install();
+    joker::install();
     auto_tech::install();
     final_hit::install();
 }
