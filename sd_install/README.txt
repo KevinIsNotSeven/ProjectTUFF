@@ -32,3 +32,5 @@ Currently pending:
     pack (no Arsene landing lag, faster/longer Arsene, "1 MORE!" smash-attack cancels, full-auto gun and down tilt: hold the button).
   - ultimate\mods\hdr-assets\ui\layout\info\info_1on1: SpongeBob instead of the hyphen on the
     1-on-1 stock popup. Replaces HDR's copy of that file (the old one is backed up).
+  - libtuff_tweaks.nro also has the Ivysaur rework (Solar Beam neutral B, seed down B, Pokemon
+    switch on down taunt, better tether).

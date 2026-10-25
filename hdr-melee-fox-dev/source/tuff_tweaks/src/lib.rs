@@ -17,6 +17,8 @@
 //! - **Kirby down air**: frame-6 Melee-Falco-style spike instead of HDR's drill (see kirby_dair).
 //! - **Joker**: no Arsene landing-lag penalty, faster/longer Arsene, full-auto gun/down tilt, "1 MORE!" smash-attack
 //!   cancels (see joker).
+//! - **Ivysaur**: charge-and-heal Solar Beam on neutral B, HDR's seed on down B, Pokemon switch
+//!   on down taunt, better tether (see ivysaur.rs).
 //! - **Auto-tech toggle** per player (see auto_tech).
 //! - **Bigger final hit**: slow-mo close-up, red/blue strobe, slow then fast zoom out (see final_hit; tunable in
 //!   sd:/tuff_final_hit.txt).
@@ -554,6 +556,9 @@ mod joker {
 // HDR's Joker gun / down tilt scripts with the "switch" damage and speed edits (generated).
 mod joker_switch_acmd;
 
+// Ivysaur: Solar Beam neutral B, seed down B, switch on down taunt, better tether (see the file).
+mod ivysaur;
+
 // ---- final hit, bigger ---------------------------------------------------------------------------
 
 mod final_hit {
@@ -838,6 +843,7 @@ pub fn main() {
     kirby_copy::install();
     kirby_dair::install();
     joker::install();
+    ivysaur::install();
     auto_tech::install();
     final_hit::install();
 }
