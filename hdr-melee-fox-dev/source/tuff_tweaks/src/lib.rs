@@ -556,6 +556,24 @@ mod joker {
 // HDR's Joker gun / down tilt scripts with the "switch" damage and speed edits (generated).
 mod joker_switch_acmd;
 
+// Pokemon Trainer: keep the same Pokemon after a KO (the game normally sends out the next one).
+mod ptrainer_keep {
+    //! Stubs the game function that rotates to the next Pokemon on death. HDR has this exact hook
+    //! (offset 0xf96330, `ptrainer_stub_death_switch`) written but commented out. Turn it off by
+    //! putting a file `sd:/tuff_pt_keep_pokemon.txt` containing 0 on the SD card.
+    #[skyline::hook(offset = 0xf96330)]
+    unsafe fn ptrainer_stub_death_switch() {}
+
+    pub fn install() {
+        let off = std::fs::read_to_string("sd:/tuff_pt_keep_pokemon.txt").map(|s| s.trim() == "0").unwrap_or(false);
+        if off {
+            super::log("ptrainer_keep: off (sd:/tuff_pt_keep_pokemon.txt)");
+            return;
+        }
+        skyline::install_hook!(ptrainer_stub_death_switch);
+    }
+}
+
 // Ivysaur: Solar Beam neutral B, seed down B, switch on down taunt, better tether (see the file).
 mod ivysaur;
 
@@ -844,6 +862,7 @@ pub fn main() {
     kirby_dair::install();
     joker::install();
     ivysaur::install();
+    ptrainer_keep::install();
     auto_tech::install();
     final_hit::install();
 }

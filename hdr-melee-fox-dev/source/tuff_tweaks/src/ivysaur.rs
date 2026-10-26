@@ -6,7 +6,8 @@
 //!   diagonally up-forward from the bulb, 25%, intangible while firing, helpless if used in the air.
 //! - **Bulb hits heal and charge** (PM): up smash, up air, down air, up throw, pummel.
 //! - **Up smash** comes out on frame 13 like PM's (HDR's hitbox otherwise).
-//! - **Down B = Seed Bomb**: HDR's vertical seed (what HDR had on neutral B). One at a time.
+//! - **Down B = Seed Bomb** (PM): HDR's vertical seed, made to fall back down; a direct hit is
+//!   10% upward and landing releases paralyzing Stun Spores. One at a time.
 //! - **Down taunt = Pokemon switch** (PM has no switch; this keeps it available).
 //! - **Tether (up B):** faster startup, ledge-grab window frames 11-32 instead of 12-14, and a
 //!   lift the first time it's used in the air (once per airtime).
@@ -21,6 +22,7 @@ use smash::hash40;
 use smash::lua2cpp::{L2CAgentBase, L2CFighterBase};
 use smash::phx::{Hash40, Vector3f};
 use smash_script::macros::*;
+use smash_script::lua_args;
 
 type CVoid = skyline::libc::c_void;
 type StatusFn = unsafe extern "C" fn(&mut L2CFighterCommon) -> L2CValue;
@@ -63,6 +65,7 @@ enum Phase {
     SynthHold,
     SynthEnd,
     Beam,
+    Seed,
 }
 
 static mut SEED_MODE: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
@@ -74,9 +77,10 @@ static mut PHASE_TIMER: [i32; MAX_ENTRIES] = [0; MAX_ENTRIES];
 static mut LIFT_USED: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
 static mut PREV_HIT: [bool; MAX_ENTRIES] = [false; MAX_ENTRIES];
 static mut PREV_STATUS: [i32; MAX_ENTRIES] = [-1; MAX_ENTRIES];
+static mut STUCK_STATUS: [i32; MAX_ENTRIES] = [-1; MAX_ENTRIES];
+static mut STUCK_FRAMES: [i32; MAX_ENTRIES] = [0; MAX_ENTRIES];
 static mut GLOW_TIMER: [i32; MAX_ENTRIES] = [0; MAX_ENTRIES];
 // HDR's (or the game's) functions that were in the slots we took over.
-static mut SAVED_N_MAIN: [usize; MAX_ENTRIES] = [0; MAX_ENTRIES];
 static mut SAVED_N_END: [usize; MAX_ENTRIES] = [0; MAX_ENTRIES];
 static mut SAVED_LW_PRE: [usize; MAX_ENTRIES] = [0; MAX_ENTRIES];
 
@@ -138,7 +142,8 @@ unsafe fn take_over(fighter: &mut L2CFighterCommon) {
     let e = entry(fighter.module_accessor);
     let base = &mut *(fighter as *mut L2CFighterCommon as *mut L2CFighterBase);
     take_slot(base, *FIGHTER_STATUS_KIND_SPECIAL_LW, StatusLine::Pre, special_lw_pre, &mut SAVED_LW_PRE[e]);
-    take_slot(base, *FIGHTER_STATUS_KIND_SPECIAL_N, StatusLine::Main, special_n_main, &mut SAVED_N_MAIN[e]);
+    let mut unused = 0;
+    take_slot(base, *FIGHTER_STATUS_KIND_SPECIAL_N, StatusLine::Main, special_n_main, &mut unused);
     take_slot(base, *FIGHTER_STATUS_KIND_SPECIAL_N, StatusLine::End, special_n_end, &mut SAVED_N_END[e]);
     fighter.global_table[0x38].assign(&L2CValue::Ptr(use_special_n as *const () as _)); // USE_SPECIAL_N_CALLBACK
     fighter.global_table[0x3B].assign(&L2CValue::Ptr(use_special_lw as *const () as _)); // USE_SPECIAL_LW_CALLBACK
@@ -157,12 +162,18 @@ unsafe extern "C" fn special_lw_pre(fighter: &mut L2CFighterCommon) -> L2CValue 
 unsafe extern "C" fn special_n_main(fighter: &mut L2CFighterCommon) -> L2CValue {
     let boma = fighter.module_accessor;
     let e = entry(boma);
-    if SEED_MODE[e] {
-        return call_saved(SAVED_N_MAIN[e], fighter); // HDR's seed
-    }
     TIMER[e] = 0;
     PHASE_TIMER[e] = 0;
-    PHASE[e] = if CHARGE[e] >= CHARGE_MAX { Phase::Beam } else { Phase::SynthStart };
+    // down B: open the bulb, then HDR's own seed-fire status (FIGHTER_PFUSHIGISOU_STATUS_KIND_
+    // SPECIAL_N_END) shoots the seed. (Calling HDR's SPECIAL_N main through a saved pointer could
+    // get the game's old Bullet Seed main instead, which never ended: the down B softlock.)
+    PHASE[e] = if SEED_MODE[e] {
+        Phase::Seed
+    } else if CHARGE[e] >= CHARGE_MAX {
+        Phase::Beam
+    } else {
+        Phase::SynthStart
+    };
     set_kinetic(boma, PHASE[e] == Phase::Beam);
     set_motion(boma, "special_n_start", "special_air_n_start");
     fighter.sub_shift_status_main(L2CValue::Ptr(special_n_loop as *const () as _))
@@ -245,7 +256,7 @@ unsafe extern "C" fn special_n_loop(fighter: &mut L2CFighterCommon) -> L2CValue 
     let e = entry(boma);
     let beam = PHASE[e] == Phase::Beam;
     if !StatusModule::is_changing(boma) && StatusModule::is_situation_changed(boma) {
-        if !beam && StatusModule::situation_kind(boma) == *SITUATION_KIND_GROUND && PHASE[e] != Phase::SynthHold {
+        if !beam && PHASE[e] != Phase::Seed && StatusModule::situation_kind(boma) == *SITUATION_KIND_GROUND && PHASE[e] != Phase::SynthHold {
             to_idle(fighter, false); // landing cancels Synthesis' start/end
             return L2CValue::I32(0);
         }
@@ -268,6 +279,12 @@ unsafe extern "C" fn special_n_loop(fighter: &mut L2CFighterCommon) -> L2CValue 
     TIMER[e] += 1;
     PHASE_TIMER[e] += 1;
     let t = TIMER[e];
+    if PHASE[e] == Phase::Seed {
+        if MotionModule::is_end(boma) {
+            fighter.change_status(L2CValue::I32(*FIGHTER_PFUSHIGISOU_STATUS_KIND_SPECIAL_N_END), L2CValue::Bool(false));
+        }
+        return L2CValue::I32(0);
+    }
     // after the bulb opens, hold the bulb-up pose
     if MotionModule::is_end(boma) {
         set_motion(boma, "special_n", "special_air_n");
@@ -337,7 +354,7 @@ unsafe extern "C" fn special_n_loop(fighter: &mut L2CFighterCommon) -> L2CValue 
                 to_idle(fighter, false);
             }
         }
-        Phase::Beam => {}
+        Phase::Beam | Phase::Seed => {}
     }
     L2CValue::I32(0)
 }
@@ -366,6 +383,59 @@ unsafe extern "C" fn game_attackhi4(agent: &mut L2CAgentBase) {
     wait(lua_state, 4.0);
     if is_excute(agent) {
         AttackModule::clear_all(boma);
+    }
+}
+
+// ---- Seed Bomb (PM) ------------------------------------------------------------------------------
+//
+// HDR's seed (with no pledge) vanishes after 30 frames near the top of its arc. PM's Seed Bomb
+// comes back down: a direct hit is 10% upward, and landing releases Stun Spores (paralyze).
+
+/// Seed lifetime in frames (HDR: 30 with no pledge, 130 with one) - long enough to land.
+const SEED_LIFE: i32 = 150;
+
+unsafe extern "C" fn seed_frame(weapon: &mut L2CWeaponCommon) {
+    let boma = weapon.module_accessor;
+    if StatusModule::status_kind(boma) != *WEAPON_PFUSHIGISOU_SEED_STATUS_KIND_MOVE {
+        return;
+    }
+    if WorkModule::get_int(boma, *WEAPON_INSTANCE_WORK_ID_INT_INIT_LIFE) != SEED_LIFE {
+        let used = WorkModule::get_int(boma, *WEAPON_INSTANCE_WORK_ID_INT_INIT_LIFE) - WorkModule::get_int(boma, *WEAPON_INSTANCE_WORK_ID_INT_LIFE);
+        WorkModule::set_int(boma, SEED_LIFE, *WEAPON_INSTANCE_WORK_ID_INT_INIT_LIFE);
+        WorkModule::set_int(boma, SEED_LIFE - used.max(0), *WEAPON_INSTANCE_WORK_ID_INT_LIFE);
+    }
+}
+
+/// Direct hit (the seed hit someone or a shield): 10%, upward (HDR: 3.5%).
+unsafe extern "C" fn seed_game_clash(agent: &mut L2CAgentBase) {
+    let lua_state = agent.lua_state_agent;
+    let boma = agent.module_accessor;
+    if is_excute(agent) {
+        ATTACK(agent, 0, 0, Hash40::new("top"), 10.0, 85, 75, 0, 50, 6.0, 0.0, 0.0, 0.0, None, None, None, 1.0, 1.0, *ATTACK_SETOFF_KIND_OFF, *ATTACK_LR_CHECK_F, false, 0, 0.0, 0, true, true, false, false, false, *COLLISION_SITUATION_MASK_GA, *COLLISION_CATEGORY_MASK_ALL, *COLLISION_PART_MASK_ALL, false, Hash40::new("collision_attr_normal"), *ATTACK_SOUND_LEVEL_M, *COLLISION_SOUND_ATTR_KICK, *ATTACK_REGION_OBJECT);
+    }
+    frame(lua_state, 2.0);
+    if is_excute(agent) {
+        AttackModule::clear_all(boma);
+        smash_script::notify_event_msc_cmd!(agent, Hash40::new_raw(0x199c462b5d));
+    }
+}
+
+/// Landing: Stun Spores around the seed.
+unsafe extern "C" fn seed_game_clashground(agent: &mut L2CAgentBase) {
+    let lua_state = agent.lua_state_agent;
+    let boma = agent.module_accessor;
+    if is_excute(agent) {
+        ATTACK(agent, 0, 0, Hash40::new("top"), 4.0, 90, 30, 0, 45, 11.0, 0.0, 4.0, 0.0, None, None, None, 0.5, 1.0, *ATTACK_SETOFF_KIND_OFF, *ATTACK_LR_CHECK_POS, false, 0, 0.0, 0, true, true, false, false, false, *COLLISION_SITUATION_MASK_GA, *COLLISION_CATEGORY_MASK_ALL, *COLLISION_PART_MASK_ALL, false, Hash40::new("collision_attr_paralyze"), *ATTACK_SOUND_LEVEL_S, *COLLISION_SOUND_ATTR_ELEC, *ATTACK_REGION_OBJECT);
+        EFFECT(agent, Hash40::new("pfushigisou_tanemg_hit"), Hash40::new("top"), 0, 3, 0, 0, 0, 0, 2.2, 0, 0, 0, 0, 0, 0, true);
+        LAST_EFFECT_SET_COLOR(agent, 1.0, 0.9, 0.3);
+    }
+    frame(lua_state, 6.0);
+    if is_excute(agent) {
+        AttackModule::clear_all(boma);
+    }
+    frame(lua_state, 8.0);
+    if is_excute(agent) {
+        smash_script::notify_event_msc_cmd!(agent, Hash40::new_raw(0x199c462b5d));
     }
 }
 
@@ -428,6 +498,21 @@ unsafe extern "C" fn frame_main(fighter: &mut L2CFighterCommon) {
         SWITCH_REQ[e] = false;
     }
 
+    // safety net against softlocks: the old Bullet Seed loop should never run now, and down B
+    // should only sit in SPECIAL_LW during a real switch
+    if status != STUCK_STATUS[e] {
+        STUCK_STATUS[e] = status;
+        STUCK_FRAMES[e] = 0;
+    }
+    STUCK_FRAMES[e] += 1;
+    let stuck = status == *FIGHTER_PFUSHIGISOU_STATUS_KIND_SPECIAL_N_LOOP
+        || (status == *FIGHTER_STATUS_KIND_SPECIAL_LW && !SWITCH_REQ[e] && STUCK_FRAMES[e] > 120);
+    if stuck {
+        log(&format!("ivysaur: unstuck from status {:#x}", status));
+        to_idle(fighter, false);
+        return;
+    }
+
     bulb_hits(boma, e, status);
 
     // full charge: the bulb glows now and then so both players can see it
@@ -468,5 +553,10 @@ pub fn install() {
         .acmd("sound_specialairn", silent, Priority::High)
         .on_start(on_start)
         .on_line(Main, frame_main)
+        .install();
+    Agent::new("pfushigisou_seed")
+        .acmd("game_clash", seed_game_clash, Priority::High)
+        .acmd("game_clashground", seed_game_clashground, Priority::High)
+        .on_line(Main, seed_frame)
         .install();
 }
