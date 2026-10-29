@@ -15,7 +15,6 @@ Smash can't add new item types, so this mod gives the existing items random vari
 | Soccer ball | normal | **NormalSoccer** texture | unchanged |
 | Soccer ball | spike | **SpikeSoccer** texture (purple) | launches you down (280°) |
 | Soccer ball | launch | **LaunchSoccer** texture (yellow) | launches you straight up (90°) |
-| Soccer ball | gravity | **GravitySoccer** texture (cyan) | strongly pulls fighters toward it while it's out: radius 70, up to 1.1 units/frame (about walking speed), staying strong over most of the radius; standing/walking/running/crouching fighters get yanked off the ground when it's above them |
 
 Variants are rolled randomly (system-clock xorshift) the first time the plugin sees an item, and remembered per object id; entries unseen for 1 s expire because ids restart every match.
 
@@ -37,7 +36,7 @@ Added 2026-10-18. Needs both the plugin and the ARCropolis mod `sd:/ultimate/mod
 - **Toolchain on this PC:** everything lives in `C:\Users\kevin\OneDrive\Desktop\GamesD\ClaudeTools` (Rust with RUSTUP_HOME/CARGO_HOME there, cargo-skyline, ultimate_tex, VGAudio, ffmpeg). `cargo skyline build` hangs on an interactive prompt without a terminal; the toolchain was installed with `cargo skyline update-std` plus `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.longpaths GIT_CONFIG_VALUE_0=true`.
 
 ## Tuning
-All the numbers are constants at the top of `src/lib.rs`: knockback multipliers, angles, gravity radius and strength, colors, and how many variants each item rolls. Change them, then rebuild:
+All the numbers are constants at the top of `src/lib.rs`: knockback multipliers, angles, colors, and how many variants each item rolls. Change them, then rebuild:
 ```bash
 cd ~/hdr-modding/item_variants
 cargo skyline build --release
@@ -48,4 +47,4 @@ cp target/aarch64-skyline-switch/release/libitem_variants.nro /d/atmosphere/cont
 - **Tint strength:** the color-blend tint might look too faint or too strong on these models.
 - **First hit:** the spike and launch angles get re-applied every frame. If the game resets a ball's hitbox on the exact frame it's kicked, that one hit might use the normal angle.
 - **Bumper strength:** the multiplier should scale both the hit when it's thrown and the bounce off a placed bumper. I haven't confirmed the second one.
-- **Gravity:** a pull of 0.6 per frame is a guess. If it's too strong to escape, lower `GRAVITY_MAX_PULL`.
+- **Gravity:** the gravity soccer ball was removed on 2026-10-28. Its mesh and texture are still in the model but always hidden.

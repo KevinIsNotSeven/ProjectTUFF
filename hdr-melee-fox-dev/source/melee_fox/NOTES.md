@@ -56,7 +56,7 @@ HDR has no L-cancel, so I used Melee's L-canceled numbers.
 | Nair | 12/9% | 11/8% |
 | Fair | 5 hits: 7/5/6/4/3% on frames 6, 16, 24, 33, 43 (2 frames each). Animation retimed to match, no float, no landing hit | 4×1.8% + 5.8% packed into frames 7-28, rises during the move |
 | Bair | 15% strong hit | 13% |
-| Uair | 5% on frames 8-9, 13% on frames 11-14 | 3% on 9-10, 10% on 12-13 |
+| Uair | 5% on frames 8-9, 11% on frames 11-14, knockback growth 110 (nerfed 2026-10-28 from Melee's 13% / 125) | 3% on 9-10, 10% on 12-13 |
 | Dair | 8 one-frame hits on frames 5, 8, 11 … 26. 3% for hits 1-4, 2% for hits 5-8 | 7 two-frame hits ×2% |
 | Shine | 5% | 3% |
 | Firefox | charge 7×2%, dash is a single 14% hit | 7×1.8%, then 16% → 10% |

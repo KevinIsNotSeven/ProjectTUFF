@@ -13,7 +13,6 @@
 //! | Soccer ball | normal  | NormalSoccer texture   | unchanged                                |
 //! | Soccer ball | spike   | SpikeSoccer (purple)   | launches down (280 degrees)              |
 //! | Soccer ball | launch  | LaunchSoccer (yellow)  | launches straight up (90 degrees)        |
-//! | Soccer ball | gravity | GravitySoccer (cyan)   | strongly pulls fighters in, even off the ground |
 //!
 //! Everything runs from one per-frame callback on every fighter (smashline "fighter" agent).
 //!
@@ -21,7 +20,8 @@
 //! - The bumper model has three copies of its mesh: `normal_model`, `weak_model` and
 //!   `tuff_model`, each with its own texture. Each bumper shows one of them. The soccer ball
 //!   works the same way with four copies (`normal_`/`spike_`/`launch_`/`gravity_gamemodel`);
-//!   its textures are edited in Project TUFF\soccer-texture.
+//!   the gravity mesh is always hidden (that variant was removed). Its textures are edited in
+//!   Project TUFF\soccer-texture.
 //! - The stock bounce sound `se_item_bumper_repel` is replaced with silence. When it starts on a
 //!   bumper, the plugin plays that bumper's own sound instead. The three sounds live in unused
 //!   Death's Scythe slots of the item sound bank (keep that item off).
@@ -30,7 +30,7 @@ use skyline::nn::ro::LookupSymbol;
 use smash::app::{self, lua_bind::*, BattleObject, BattleObjectModuleAccessor};
 use smash::lib::lua_const::*;
 use smash::lua2cpp::L2CFighterCommon;
-use smash::phx::{Hash40, Vector3f};
+use smash::phx::Hash40;
 use smashline::*;
 
 // ---- tuning ---------------------------------------------------------------------------------
@@ -44,25 +44,13 @@ const STRONG_BUMPER_KB_MUL: f32 = 1.5;
 const BUMPER_MESHES: [&str; 3] = ["normal_model", "weak_model", "tuff_model"];
 const BUMPER_SOUNDS: [&str; 3] = ["se_item_deathscythe_swing_l", "se_item_deathscythe_swing_m", "se_item_deathscythe_reap"];
 
-/// Soccer ball variants: normal, spike, launch, gravity (equal odds).
-const SOCCER_VARIANTS: u32 = 4;
+/// Soccer ball variants: normal, spike, launch (equal odds).
+const SOCCER_VARIANTS: u32 = 3;
 const SPIKE_ANGLE: i32 = 280;
-/// Mesh for each soccer ball variant (normal, spike, launch, gravity).
+/// Mesh for each soccer ball variant (normal, spike, launch). The model still has a gravity
+/// mesh from the removed gravity variant; listing it here keeps it hidden.
 const SOCCER_MESHES: [&str; 4] = ["normal_gamemodel", "spike_gamemodel", "launch_gamemodel", "gravity_gamemodel"];
 const LAUNCH_ANGLE: i32 = 90;
-
-/// Gravity ball: fighters within this radius get pulled toward the ball.
-const GRAVITY_RADIUS: f32 = 70.0;
-/// Max pull per frame (in position units) at the ball. It fades with the square root of the
-/// distance, so it stays strong over most of the radius (walking speed is about 1 per frame).
-const GRAVITY_MAX_PULL: f32 = 1.1;
-/// No pull this close to the ball (stops jitter when holding or standing on it).
-const GRAVITY_DEADZONE: f32 = 5.0;
-/// Upward pull (per frame) that yanks a standing / walking / running / crouching fighter off
-/// the ground. Fighters in the middle of a move aren't interrupted.
-const GRAVITY_LIFT: f32 = 0.7;
-
-const MAX_GRAVITY_BALLS: usize = 8;
 
 
 // ---- item manager ---------------------------------------------------------------------------
@@ -195,14 +183,11 @@ fn log(msg: &str) {
 
 // ---- per-frame ------------------------------------------------------------------------------
 
-unsafe extern "C" fn item_variants_frame(fighter: &mut L2CFighterCommon) {
+unsafe extern "C" fn item_variants_frame(_fighter: &mut L2CFighterCommon) {
     let manager = item_manager();
     if manager.is_null() {
         return;
     }
-
-    let mut gravity_balls = [(0.0f32, 0.0f32); MAX_GRAVITY_BALLS];
-    let mut gravity_count = 0;
 
     SCAN += 1;
     let count = smash::app::lua_bind::ItemManager::get_num_of_active_item_all(manager);
@@ -233,79 +218,11 @@ unsafe extern "C" fn item_variants_frame(fighter: &mut L2CFighterCommon) {
             match variant {
                 1 => set_angle(boma, SPIKE_ANGLE),
                 2 => set_angle(boma, LAUNCH_ANGLE),
-                3 => {
-                    if gravity_count < MAX_GRAVITY_BALLS {
-                        gravity_balls[gravity_count] = (PostureModule::pos_x(boma), PostureModule::pos_y(boma));
-                        gravity_count += 1;
-                    }
-                }
                 _ => {}
             }
         }
     }
     forget_missing_items();
-
-    if gravity_count > 0 {
-        pull_toward_gravity_balls(fighter, &gravity_balls[..gravity_count]);
-    }
-}
-
-unsafe fn pull_toward_gravity_balls(fighter: &mut L2CFighterCommon, balls: &[(f32, f32)]) {
-    let boma = fighter.module_accessor;
-    let status = StatusModule::status_kind(boma);
-    if status == *FIGHTER_STATUS_KIND_DEAD
-        || status == *FIGHTER_STATUS_KIND_REBIRTH
-        || status == *FIGHTER_STATUS_KIND_ENTRY
-        || status == *FIGHTER_STATUS_KIND_STANDBY
-    {
-        return;
-    }
-
-    let fx = PostureModule::pos_x(boma);
-    // aim at the body, not the feet
-    let fy = PostureModule::pos_y(boma) + 8.0;
-    let grounded = StatusModule::situation_kind(boma) == *SITUATION_KIND_GROUND;
-
-    let mut push_x = 0.0;
-    let mut push_y = 0.0;
-    for &(bx, by) in balls {
-        let dx = bx - fx;
-        let dy = by - fy;
-        let dist = (dx * dx + dy * dy).sqrt();
-        if dist < GRAVITY_DEADZONE || dist > GRAVITY_RADIUS {
-            continue;
-        }
-        let pull = GRAVITY_MAX_PULL * (1.0 - dist / GRAVITY_RADIUS).sqrt();
-        push_x += dx / dist * pull;
-        push_y += dy / dist * pull;
-    }
-    if grounded {
-        let free = [
-            *FIGHTER_STATUS_KIND_WAIT,
-            *FIGHTER_STATUS_KIND_WALK,
-            *FIGHTER_STATUS_KIND_DASH,
-            *FIGHTER_STATUS_KIND_RUN,
-            *FIGHTER_STATUS_KIND_RUN_BRAKE,
-            *FIGHTER_STATUS_KIND_TURN,
-            *FIGHTER_STATUS_KIND_TURN_DASH,
-            *FIGHTER_STATUS_KIND_TURN_RUN,
-            *FIGHTER_STATUS_KIND_SQUAT,
-            *FIGHTER_STATUS_KIND_SQUAT_WAIT,
-            *FIGHTER_STATUS_KIND_SQUAT_RV,
-            *FIGHTER_STATUS_KIND_LANDING,
-        ]
-        .contains(&status);
-        if free && push_y > GRAVITY_LIFT {
-            // yanked off the ground: become airborne, then the pull carries them up next frame
-            StatusModule::set_situation_kind(boma, app::SituationKind(*SITUATION_KIND_AIR), true);
-            StatusModule::change_status_request(boma, *FIGHTER_STATUS_KIND_FALL, false);
-        }
-        // the floor holds them down until they're airborne; meanwhile they slide
-        push_y = 0.0;
-    }
-    if push_x != 0.0 || push_y != 0.0 {
-        PostureModule::add_pos(boma, &Vector3f { x: push_x, y: push_y, z: 0.0 });
-    }
 }
 
 #[skyline::main(name = "item_variants")]
