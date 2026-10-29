@@ -17,7 +17,7 @@ A set of tweaks for **Super Smash Bros. Ultimate 13.0.4** layered on top of **[H
 | **SpongeBob score popup.** The hyphen between the numbers on the 1-on-1 stock popup ("3 - 2") is SpongeBob's face (`sponge dash.png`). | `hdr-melee-fox-dev/source/ui_tweaks/score_picture.py`; the patched layout is in `sd_install/ultimate/mods/hdr-assets` |
 | **Auto-tech toggle.** Hold shield and press a taunt: a ding and sparkle mean on, a thud means off. Each player has their own toggle. | `tuff_tweaks` |
 | **Little Mac dash attack.** He trips and throws a hitbox forward, Villager-style, with his hoodie as the visible projectile. | `hdr-melee-fox-dev/source/littlemac_trip` |
-| **Melee Fox.** Melee stats, cancel frames and hitboxes. | `hdr-melee-fox-dev/source/melee_fox` (hitboxes); the stats and cancel frames are in the `hdr-melee-fox` mod on the SD card |
+| **Melee Fox.** Melee stats, cancel frames and hitboxes. | `hdr-melee-fox-dev/source/melee_fox` (hitboxes, installed by the installer and updater); the stats and cancel frames are in the `hdr-melee-fox` mod, which is only on the original SD card |
 | **Custom logos** replacing HDR's on the title screen, matchup screen and launcher. | Artwork in `custom logo/` |
 | **Red menu theme.** HDR's green menus, Ready/GAME! text, loading spinner and launcher are red. Only green HDR added is changed; the game's own greens (player 4, green team, gauges) stay. | `hdr-melee-fox-dev/source/recolor_ui` |
 
